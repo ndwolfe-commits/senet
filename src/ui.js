@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=13";
+import { createNet, newRoomCode } from "./net.js?v=14";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -38,6 +38,7 @@ const root = $("#app");
 
 const ICON = {
   mic: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+  eye: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   cam: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 11l6-3v8l-6-3"/></svg>',
 };
 const SYMBOL = {
@@ -119,7 +120,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 13;
+const VERSION = 14;
 
 function connect() {
   if (app.net) app.net.close();
@@ -246,7 +247,7 @@ function showGame() {
         <div class="card off"><div><span id="off-me-label"></span><span id="off-me"></span></div><div><span id="off-them-label"></span><span id="off-them"></span></div></div>
         <div class="tile me"><div class="initial" id="me-initial"></div><video id="me-video" autoplay playsinline muted hidden></video>
           <div class="tag"><i class="dot" id="me-dot"></i><span id="me-name"></span></div>
-          ${remote ? `<div class="av"><button data-act="mic" aria-label="Mute microphone">${ICON.mic}</button><button data-act="cam" aria-label="Turn camera off">${ICON.cam}</button></div>` : ""}
+          ${remote ? `<div class="av"><button data-act="mic" aria-label="Mute microphone">${ICON.mic}</button><button data-act="cam" aria-label="Turn camera off">${ICON.cam}</button><button data-act="selfview" aria-label="Hide my own picture from me">${ICON.eye}</button></div>` : ""}
         </div>
       </div>
     </div>`;
@@ -266,8 +267,16 @@ function attachVideo() {
       const playing = video.play();
       if (playing) playing.catch(() => {});
     }
-    video.hidden = !hasPicture;
-    $(iSel).hidden = !!hasPicture;
+    // You can hide your own picture from yourself; the other player still sees you.
+    const show = hasPicture && !(vSel === "#me-video" && store.get("senet-hide-self") === "1");
+    video.hidden = !show;
+    $(iSel).hidden = !!show;
+  }
+  const eye = $('[data-act="selfview"]');
+  if (eye) {
+    const hidden = store.get("senet-hide-self") === "1";
+    eye.classList.toggle("off", hidden);
+    eye.setAttribute("aria-label", hidden ? "Show my own picture to me" : "Hide my own picture from me");
   }
   soundNote();
 }
@@ -542,6 +551,12 @@ const actions = {
   rules: showRules,
   "close-rules": () => $(".sheet").remove(),
   hear: () => wakeSound(),
+  selfview: () => {
+    const hidden = store.get("senet-hide-self") === "1";
+    store.set("senet-hide-self", hidden ? "0" : "1");
+    attachVideo();
+    setFlash(hidden ? "You can see your own picture again." : "Your picture is hidden from you. They can still see you.");
+  },
   mic: (button) => toggleTrack("mic", button),
   cam: (button) => toggleTrack("cam", button),
   // Opens WhatsApp itself with the message ready, so it sends straight away.

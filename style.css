@@ -66,8 +66,8 @@ h1, .carved { font-family: Cinzel, Georgia, serif; font-weight: 700; }
 .dot { flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--light-piece); border: 1px solid var(--light-edge); }
 .dot.dark { background: var(--dark-piece); border-color: var(--dark-edge); }
 .dot.none { background: #55657f; border-color: #55657f; }
-.av { position: absolute; right: 6px; bottom: 6px; display: flex; gap: 6px; }
-.av button { width: 44px; height: 44px; border-radius: 50%; border: none; background: var(--night);
+.av { position: absolute; left: 4px; right: 4px; bottom: 6px; display: flex; gap: 4px; justify-content: flex-end; }
+.av button { width: 44px; max-width: 32%; height: 44px; border-radius: 50%; border: none; background: var(--night);
   display: flex; align-items: center; justify-content: center; }
 .av button.off { background: var(--red); }
 .av svg { width: 20px; height: 20px; }
