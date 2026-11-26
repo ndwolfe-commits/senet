@@ -6,8 +6,8 @@
 // ============================================================================
 
 import { RULES, rulesSummary } from "./rules.js";
-import { newGame, throwSticks, applyMove, explainTap } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=6";
+import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
+import { createNet, newRoomCode } from "./net.js?v=7";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -32,6 +32,7 @@ const app = {
   flash: null,
   flashTimer: null,
   inGame: false,
+  selected: null, // the move being previewed: tap once to see it, again to make it
 };
 const root = $("#app");
 
@@ -114,7 +115,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 6;
+const VERSION = 7;
 
 function connect() {
   if (app.net) app.net.close();
@@ -145,6 +146,7 @@ function onStatus(status) {
 
 function adopt(game) {
   const first = !app.inGame;
+  app.selected = null;
   app.game = game;
   save();
   app.net.sendState(game); // keep our stored copy on the relay up to date too
@@ -222,7 +224,7 @@ function showGame() {
     <div class="game">
       <div class="frame"><div class="board" id="board">${cells}</div></div>
       <div class="side">
-        <div class="tile them"><div class="initial" id="them-initial"></div><video id="them-video" autoplay playsinline hidden></video>
+        <div class="tile them"><div class="initial" id="them-initial"></div><video id="them-video" autoplay playsinline muted hidden></video><audio id="them-audio" autoplay></audio>
           <div class="tag"><i class="dot" id="them-dot"></i><span id="them-name"></span></div>
           <button class="hear" data-act="hear" hidden>Tap to hear them</button></div>
         <div class="card status"><div class="carved" id="headline"></div><div class="sub" id="sub"></div></div>
@@ -248,11 +250,25 @@ function attachVideo() {
     if (stream && video.srcObject !== stream) {
       video.srcObject = stream;
       const playing = video.play();
-      if (playing && vSel === "#them-video") playing.catch(() => { $(".hear").hidden = false; });
+      if (playing) playing.catch(() => {});
     }
     video.hidden = !hasPicture;
     $(iSel).hidden = !!hasPicture;
   }
+  // Their sound plays through its own audio element. Phones sometimes refuse
+  // to start sound without a tap, so we also retry on every tap (wakeSound).
+  const audio = $("#them-audio");
+  if (app.peerStream && audio.srcObject !== app.peerStream) {
+    audio.srcObject = app.peerStream;
+    wakeSound(true);
+  }
+}
+
+function wakeSound(showButton = false) {
+  const audio = $("#them-audio");
+  if (!audio || !audio.srcObject || !audio.paused) return;
+  const playing = audio.play();
+  if (playing) playing.then(() => { $(".hear").hidden = true; }).catch(() => { if (showButton) $(".hear").hidden = false; });
 }
 
 const them = () => (app.me === "A" ? "B" : "A");
@@ -296,8 +312,9 @@ function update() {
   const lost = remote && app.conn !== "connected";
   const lostText = app.conn === "offline" ? "No connection. Trying to get it back…"
     : `${g.names[op]} isn't on the game page right now. Waiting for them…`;
-  subEl.textContent = app.flash || (lost ? lostText : sub);
-  subEl.classList.toggle("warn", !!app.flash || lost);
+  const sel = app.selected;
+  subEl.textContent = app.flash || (sel ? previewText(sel) : lost ? lostText : sub);
+  subEl.classList.toggle("warn", !!app.flash || (lost && !sel));
 
   for (const [who, key] of [[me, "me"], [op, "them"]]) {
     const side = g.colour[who];
@@ -323,6 +340,13 @@ function update() {
     if (cell) cell.classList.add("last");
   }
   syncPieces();
+
+  document.querySelectorAll(".cell.target, .cell.target2").forEach((el) => el.classList.remove("target", "target2"));
+  for (const p of app.pieces) p.el.classList.toggle("picked", !!sel && p.sq === sel.from);
+  if (sel && sel.to !== "off") {
+    $(`.cell[data-n="${sel.to}"]`).classList.add("target");
+    if (sel.waters) $(`.cell[data-n="${sel.finalTo}"]`).classList.add("target2");
+  }
 }
 
 // Keep one element per piece so pieces slide between squares.
@@ -374,6 +398,7 @@ function save() {
 function commit(next) {
   if (next === app.game) return;
   next = { ...next, rev: (app.game.rev || 0) + 1 };
+  app.selected = null;
   app.game = next;
   save();
   if (app.net) app.net.sendState(next);
@@ -381,14 +406,32 @@ function commit(next) {
   update();
 }
 
+// Tap a piece once to see where it would go. Tap it again, or tap the square
+// it lands on, to make the move. Tap a different piece to look at that one instead.
 function tapCell(n) {
   if (!canAct()) return setFlash(app.game.phase === "over" ? "The game is over." : "Wait for your turn.");
+  const sel = app.selected;
+  if (sel && (n === sel.from || n === sel.to || n === sel.finalTo)) return commit(applyMove(app.game, sel.from));
+  app.selected = null;
   const reason = explainTap(app.game, n);
-  if (!reason) return commit(applyMove(app.game, n));
+  if (!reason) {
+    app.selected = legalMoves(app.game).find((m) => m.from === n);
+    app.flash = null;
+    return update();
+  }
+  if (sel && !app.game.board[n]) return update(); // tapped an empty square: just cancel the preview
   sound.nope();
   const piece = app.pieces.find((p) => p.sq === n);
   if (piece) { piece.el.classList.remove("shake"); void piece.el.offsetWidth; piece.el.classList.add("shake"); }
   setFlash(reason);
+}
+
+function previewText(m) {
+  const again = " Tap again to confirm.";
+  if (m.to === "off") return "Takes this piece off the board." + again;
+  if (m.waters) return `Into the Waters, then back to ${m.finalTo}.` + again;
+  if (m.swap) return `Swaps places with the piece on ${m.to}.` + again;
+  return `${m.dir < 0 ? "Back" : "Moves"} to ${m.to}.` + again;
 }
 
 function showRules() {
@@ -416,7 +459,7 @@ const actions = {
   local: startLocal,
   rules: showRules,
   "close-rules": () => $(".sheet").remove(),
-  hear: (button) => { $("#them-video").play(); button.hidden = true; },
+  hear: () => wakeSound(true),
   mic: (button) => toggleTrack("mic", button),
   cam: (button) => toggleTrack("cam", button),
   share: async () => {
@@ -437,6 +480,7 @@ const actions = {
 };
 
 root.addEventListener("click", (event) => {
+  wakeSound();
   const cell = event.target.closest(".cell");
   if (cell) return tapCell(Number(cell.dataset.n));
   const button = event.target.closest("[data-act]");
