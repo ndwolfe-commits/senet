@@ -15,7 +15,16 @@ const SEEN_FOR = 11000; // the other player counts as present this long after th
 const CALL_RETRY = 12000;
 const CALL_TRIES = 6;
 
-export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, onStatus }) {
+// Servers that help two phones find a route to each other for video.
+const ICE = {
+  iceServers: [
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] },
+    { urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"], username: "peerjs", credential: "peerjsp" },
+    { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turns:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
+  ],
+};
+
+export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, onStatus, onCallState = () => {} }) {
   const other = me === "A" ? "B" : "A";
   const topicOut = `senet-nw/${room}/${me}`;
   const topicIn = `senet-nw/${room}/${other}`;
@@ -86,16 +95,34 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
   let callTimer = null;
   let peerTimer = null;
 
+  // Follow one call and report, in plain steps, how far it got:
+  // "calling" -> "checking" -> "connected", or "failed".
   function wireCall(call) {
     if (!call) return;
-    call.on("stream", (remote) => { gotRemote = true; onPeerStream(remote); });
-    call.on("close", () => { gotRemote = false; callTries = 0; });
+    onCallState("calling");
+    call.on("stream", (remote) => onPeerStream(remote));
+    call.on("close", () => { gotRemote = false; });
+    call.on("error", () => onCallState("failed"));
+    const watch = () => {
+      const pc = call.peerConnection;
+      if (!pc) return setTimeout(watch, 300);
+      const report = () => {
+        const state = pc.iceConnectionState;
+        if (state === "connected" || state === "completed") { gotRemote = true; callTries = 0; onCallState("connected"); }
+        else if (state === "failed") { gotRemote = false; onCallState("failed"); try { call.close(); } catch (e) { /* gone */ } maybeCall(); }
+        else if (state === "disconnected") { onCallState("dropped"); }
+        else onCallState("checking");
+      };
+      pc.addEventListener("iceconnectionstatechange", report);
+      report();
+    };
+    watch();
   }
 
   function startPeer() {
     if (closed || typeof Peer === "undefined") return;
     if (peer && !peer.destroyed) peer.destroy();
-    peer = new Peer(myPeerId);
+    peer = new Peer(myPeerId, { config: ICE });
     const mine = peer;
     peer.on("open", maybeCall);
     peer.on("call", (call) => { call.answer(stream || undefined); wireCall(call); });
