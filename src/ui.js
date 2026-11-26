@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=2";
+import { createNet, newRoomCode } from "./net.js?v=5";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -71,9 +71,10 @@ function showHome(note = "") {
       </label>
       ${joining ? '<button class="btn gold" data-act="guest">Join game</button>' : ""}
       ${resuming ? '<button class="btn gold" data-act="resume">Resume your game</button>' : ""}
-      ${!joining ? `<button class="btn ${resuming ? "plain" : "gold"}" data-act="host">Start a game with someone</button>` : ""}
-      <button class="btn plain" data-act="local">Two players, one phone</button>
+      ${!joining ? `<button class="btn ${resuming ? "plain" : "gold"}" data-act="host">Play online: send a link</button>` : ""}
+      <button class="btn plain" data-act="local">Two players on this phone</button>
       <p>${esc(note) || "You'll be asked for your camera and microphone so you can see and hear each other."}</p>
+      <p>Version ${VERSION}</p>
     </div>`;
 }
 
@@ -101,7 +102,7 @@ function showInvite() {
       <button class="btn gold" data-act="share">Send link</button>
       <button class="btn plain" data-act="copy">Copy</button>
     </div>
-    <p id="lobby-note">Waiting for them to join. Keep this page open.</p>`);
+    <p id="lobby-note">Connecting…</p>`);
 }
 
 // --------------------------------------------------------------- joining ---
@@ -113,11 +114,14 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
+const VERSION = 5;
+
 function connect() {
   if (app.net) app.net.close();
   app.net = createNet({
     room: app.room,
-    isHost: app.mode === "host",
+    me: app.me,
+    getPing: () => ({ name: app.name }),
     stream: app.stream,
     onMessage,
     onPeerStream(remote) { app.peerStream = remote; attachVideo(); },
@@ -125,40 +129,40 @@ function connect() {
   });
 }
 
-const LOBBY_NOTE = {
-  waiting: "Waiting for them to join. Keep this page open.",
-  joining: "Joining the game…",
-  retrying: "Still trying to reach the other phone…",
-  nohost: "The other player's game page isn't open. Ask them to go back to it.",
-  lost: "Connection lost. Trying again…",
-  error: "Connection problem. Trying again…",
-};
-
 function onStatus(status) {
+  const was = app.conn;
   app.conn = status;
-  if (status === "connected" && app.mode === "guest") {
-    app.net.send({ t: "hello", name: app.name, hasMedia: !!app.stream });
-  }
-  if (status === "connected" && app.mode === "host" && app.inGame) {
-    app.net.send({ t: "state", game: { ...app.game, fx: [] } });
-  }
-  if (status === "taken") return showHome("This game is already open in another tab or phone.");
+  // Whenever the link comes up, put our copy of the game on the relay.
+  if (status !== "offline" && was !== status && app.game && app.mode === "host") app.net.sendState(app.game);
   const note = $("#lobby-note");
-  if (note && LOBBY_NOTE[status]) note.textContent = LOBBY_NOTE[status];
+  if (note) {
+    note.textContent = status === "offline" ? "No connection yet. Trying…"
+      : app.mode === "host" ? "Waiting for them to join…"
+      : "Connected. Fetching the game…";
+  }
   if (app.inGame) update();
 }
 
-function onMessage(msg) {
-  if (msg.t === "hello" && app.mode === "host") {
-    app.game = { ...app.game, names: { ...app.game.names, B: msg.name }, fx: [] };
-    save();
-    app.net.send({ t: "state", game: app.game });
-    if (!app.inGame) showGame(); else update();
-  } else if (msg.t === "state") {
-    const first = !app.inGame;
-    app.game = msg.game;
-    save();
-    if (first) showGame(); else { react(); update(); }
+function adopt(game) {
+  const first = !app.inGame;
+  app.game = game;
+  save();
+  if (first) { if (app.mode === "guest") showGame(); } else { react(); update(); }
+}
+
+function onMessage(msg, { stored }) {
+  if (msg.t === "state" && msg.game) {
+    const mine = app.game ? app.game.rev || 0 : -1;
+    if ((msg.game.rev || 0) > mine) adopt(msg.game);
+    return;
+  }
+  if (msg.t !== "ping" || stored) return;
+  if (app.mode === "host") {
+    // The guest is here: record their name, show the board, and send the game.
+    const named = msg.name && app.game.names.B !== msg.name;
+    if (named) app.game = { ...app.game, names: { ...app.game.names, B: msg.name }, rev: (app.game.rev || 0) + 1, fx: [] };
+    if (named || !app.inGame) { save(); app.net.sendState(app.game); }
+    if (!app.inGame) showGame(); else if (named) update();
   }
 }
 
@@ -184,6 +188,7 @@ async function startGuest() {
   app.name = myName("Player 2");
   showLobby("<p>Getting your camera ready…</p>");
   app.stream = await getMedia();
+  app.game = null;
   showLobby('<p id="lobby-note">Joining the game…</p>');
   connect();
 }
@@ -210,7 +215,7 @@ function showGame() {
     }
   }
   root.innerHTML = `
-    <div class="top"><div class="carved">SENET</div><button data-act="rules">Rules</button></div>
+    <div class="top"><div class="carved">SENET <span class="ver">v${VERSION}</span></div><button data-act="rules">Rules</button></div>
     <div class="game">
       <div class="frame"><div class="board" id="board">${cells}</div></div>
       <div class="side">
@@ -284,8 +289,11 @@ function update() {
   const [head, sub] = headline();
   $("#headline").textContent = head;
   const subEl = $("#sub");
-  const lost = app.mode !== "local" && app.conn !== "connected";
-  subEl.textContent = app.flash || (lost ? "Connection lost. Trying to get it back…" : sub);
+  const remote = app.mode !== "local";
+  const lost = remote && app.conn !== "connected";
+  const lostText = app.conn === "offline" ? "No connection. Trying to get it back…"
+    : `${g.names[op]} isn't on the game page right now. Waiting for them…`;
+  subEl.textContent = app.flash || (lost ? lostText : sub);
   subEl.classList.toggle("warn", !!app.flash || lost);
 
   for (const [who, key] of [[me, "me"], [op, "them"]]) {
@@ -362,9 +370,10 @@ function save() {
 
 function commit(next) {
   if (next === app.game) return;
+  next = { ...next, rev: (app.game.rev || 0) + 1 };
   app.game = next;
   save();
-  if (app.net) app.net.send({ t: "state", game: next });
+  if (app.net) app.net.sendState(next);
   react();
   update();
 }
