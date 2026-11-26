@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=9";
+import { createNet, newRoomCode } from "./net.js?v=10";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -115,7 +115,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 9;
+const VERSION = 10;
 
 function connect() {
   if (app.net) app.net.close();
@@ -515,4 +515,19 @@ window.addEventListener("orientationchange", settle);
 window.addEventListener("resize", settle);
 document.addEventListener("visibilitychange", settle);
 
+// Phones hold on to old copies of the page for a while. On opening, ask the
+// server which version is current and, if this copy is older, load the new one.
+async function checkForUpdate() {
+  try {
+    const res = await fetch(`version.json?t=${Date.now()}`, { cache: "no-store" });
+    const latest = (await res.json()).version;
+    if (latest > VERSION && params.get("fresh") !== String(latest) && !app.inGame) {
+      const next = new URLSearchParams(location.search);
+      next.set("fresh", latest);
+      location.replace(`${location.pathname}?${next}`);
+    }
+  } catch (e) { /* offline: carry on with this copy */ }
+}
+
 showHome();
+checkForUpdate();
