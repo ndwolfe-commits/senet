@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=10";
+import { createNet, newRoomCode } from "./net.js?v=11";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -99,9 +99,10 @@ function showInvite() {
   showLobby(`
     <p>Send this link to the other player. The game starts when they open it.</p>
     <div class="linkbox">${esc(inviteLink())}</div>
+    <button class="btn gold" data-act="whatsapp">Send by WhatsApp</button>
     <div class="row">
-      <button class="btn gold" data-act="share">Send link</button>
-      <button class="btn plain" data-act="copy">Copy</button>
+      <button class="btn plain" data-act="share">Another way</button>
+      <button class="btn plain" data-act="copy">Copy link</button>
     </div>
     <p id="lobby-note">Connecting…</p>`);
 }
@@ -115,7 +116,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 10;
+const VERSION = 11;
 
 function connect() {
   if (app.net) app.net.close();
@@ -481,6 +482,8 @@ const actions = {
   hear: () => wakeSound(),
   mic: (button) => toggleTrack("mic", button),
   cam: (button) => toggleTrack("cam", button),
+  // Opens WhatsApp itself with the message ready, so it sends straight away.
+  whatsapp: () => { location.href = `whatsapp://send?text=${encodeURIComponent("Play Senet with me: " + inviteLink())}`; },
   share: async () => {
     const data = { title: "Senet", text: "Play Senet with me", url: inviteLink() };
     if (navigator.share) { try { await navigator.share(data); } catch (e) { /* cancelled */ } }
