@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RULES } from "../src/rules.js";
-import { newGame, throwSticks, applyMove, legalMoves, rollSticks } from "../src/engine.js";
+import { newGame, throwSticks, applyMove, legalMoves, rollSticks, explainTap } from "../src/engine.js";
 
 const roll = (value) => ({ sticks: [], value });
 
@@ -158,4 +158,12 @@ test("winning: last piece off ends the game", () => {
   s = applyMove(s, 30);
   assert.equal(s.phase, "over");
   assert.equal(s.winner, "A");
+});
+
+test("explainTap gives a reason for a blocked piece and null for a legal one", () => {
+  const s = position({ 10: "dark", 12: "light", 13: "light", 2: "dark" });
+  s.pending = { value: 3, again: false };
+  assert.match(explainTap(s, 10), /protected/);
+  assert.equal(explainTap(s, 2), null);
+  assert.match(explainTap(s, 12), /not your piece/);
 });

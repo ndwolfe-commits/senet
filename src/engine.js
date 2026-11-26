@@ -28,6 +28,8 @@ export function newGame(names = {}, R = RULES) {
     lastThrow: null,
     pending: null,
     winner: null,
+    lastMove: null,
+    fx: [],
     log: [`Take turns throwing. First to throw a ${R.opening.throwNeeded} starts as ${R.opening.firstPlayerColour}.`],
   };
 }
@@ -85,25 +87,30 @@ function watersDestination(board, R) {
   return null;
 }
 
-// One possible move for the piece on `from`, or null if it can't go.
-function candidate(board, side, from, dir, value, R) {
+// Try one move for the piece on `from`.
+// Returns { move } if it can go, or { reason } saying why not.
+function tryMove(board, side, from, dir, value, R) {
   const to = from + dir * value;
 
   if (dir > 0 && to > R.squares) {
-    if (!canBearOff(board, side, R)) return null;
-    if (blockedByWall(board, side, from, R.squares + 1, R)) return null;
-    return { from, to: "off", dir, leftover: to - (R.squares + 1) };
+    if (!canBearOff(board, side, R)) {
+      return { reason: "You can't take pieces off while you still have pieces in the first row." };
+    }
+    if (blockedByWall(board, side, from, R.squares + 1, R)) return { reason: "Three in a row blocks the way." };
+    return { move: { from, to: "off", dir, leftover: to - (R.squares + 1) } };
   }
-  if (to < 1) return null;
-  if (blockedByWall(board, side, from, to, R)) return null;
+  if (to < 1) return { reason: "That would go off the start of the board." };
+  if (blockedByWall(board, side, from, to, R)) return { reason: "Three in a row blocks the way." };
 
   const target = board[to];
-  if (target === side) return null;
+  if (target === side) return { reason: `Your own piece is on ${to}.` };
   let swap = false;
   if (target) {
-    if (!R.swapOnLanding) return null;
-    if (R.safeSquares.includes(to)) return null;
-    if (runLength(board, to, R) >= R.blocking.protectSize) return null;
+    if (!R.swapOnLanding) return { reason: `Square ${to} is taken.` };
+    if (R.safeSquares.includes(to)) return { reason: `Square ${to} is safe. You can't land on a piece there.` };
+    if (runLength(board, to, R) >= R.blocking.protectSize) {
+      return { reason: `Square ${to} is protected: two or more in a row.` };
+    }
     swap = true;
   }
 
@@ -113,9 +120,27 @@ function candidate(board, side, from, dir, value, R) {
     b[from] = swap ? other(side) : null;
     move.waters = true;
     move.finalTo = watersDestination(b, R);
-    if (move.finalTo === null) return null;
+    if (move.finalTo === null) return { reason: "No free square to go back to." };
   }
-  return move;
+  return { move };
+}
+
+function candidate(board, side, from, dir, value, R) {
+  return tryMove(board, side, from, dir, value, R).move || null;
+}
+
+// Why tapping the piece on `from` does nothing. Returns null if the move is legal.
+export function explainTap(state, from, R = RULES) {
+  if (state.phase === "opening") return `Keep throwing. The first ${R.opening.throwNeeded} starts the game.`;
+  if (state.phase === "over") return "The game is over.";
+  if (!state.pending) return "Throw the sticks first.";
+  const side = sideToMove(state);
+  if (state.board[from] !== side) return state.board[from] ? "That's not your piece." : "No piece there.";
+  const legal = legalMoves(state, R);
+  if (legal.some((m) => m.from === from)) return null;
+  const fwd = tryMove(state.board, side, from, +1, state.pending.value, R);
+  if (fwd.reason) return fwd.reason;
+  return "You can only move backward when no forward move is possible.";
 }
 
 // All moves the side to move may make with the pending throw.
@@ -160,6 +185,7 @@ export function throwSticks(state, roll = null, R = RULES) {
   const s = clone(state);
   const r = roll || rollSticks(Math.random, R);
   s.lastThrow = r;
+  s.fx = ["throw"]; // what just happened, for sounds and animation
   const who = playerLabel(s);
 
   if (s.phase === "opening") {
@@ -177,6 +203,8 @@ export function throwSticks(state, roll = null, R = RULES) {
     if (s.board[bonusFrom] === first && !s.board[bonusTo]) {
       s.board[bonusFrom] = null;
       s.board[bonusTo] = first;
+      s.lastMove = { from: bonusFrom, to: bonusTo };
+      s.fx.push("move");
     }
     say(s, `${s.names[s.turn]} threw ${r.value} and plays ${cap(first)}. The piece on ${bonusFrom} jumps to ${bonusTo}.`);
     return endOfMove(s, R.throwAgainOn.includes(r.value));
@@ -204,6 +232,8 @@ export function applyMove(state, from, R = RULES) {
   const who = playerLabel(s);
 
   b[from] = null;
+  s.fx = [move.to === "off" ? "off" : move.waters ? "waters" : move.swap ? "swap" : "move"];
+  s.lastMove = { from, to: move.to === "off" ? null : move.waters ? move.finalTo : move.to };
   if (move.to === "off") {
     s.off[side] += 1;
     say(s, `${who} took a piece off from ${from}.`);
@@ -211,6 +241,7 @@ export function applyMove(state, from, R = RULES) {
       s.phase = "over";
       s.winner = s.turn;
       s.pending = null;
+      s.fx.push("win");
       say(s, `${playerLabel(s)} wins!`);
       return s;
     }
