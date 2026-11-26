@@ -123,6 +123,13 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
         else if (state === "disconnected") { onCallState("dropped"); }
         else onCallState("checking");
       };
+      // Ask the phone to play their picture and sound with as little waiting as it can.
+      const hurry = () => pc.getReceivers().forEach((r) => {
+        try { r.jitterBufferTarget = 0; } catch (e) { /* not supported */ }
+        try { r.playoutDelayHint = 0; } catch (e) { /* not supported */ }
+      });
+      pc.addEventListener("track", hurry);
+      hurry();
       pc.addEventListener("iceconnectionstatechange", report);
       report();
     };

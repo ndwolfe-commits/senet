@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=15";
+import { createNet, newRoomCode } from "./net.js?v=16";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -120,7 +120,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 15;
+const VERSION = 16;
 
 function connect() {
   if (app.net) app.net.close();
