@@ -72,7 +72,7 @@ function showHome(note = "") {
       ${joining ? '<button class="btn gold" data-act="guest">Join game</button>' : ""}
       ${resuming ? '<button class="btn gold" data-act="resume">Resume your game</button>' : ""}
       ${!joining ? `<button class="btn ${resuming ? "plain" : "gold"}" data-act="host">Start a game with someone</button>` : ""}
-      <button class="btn plain" data-act="local">Play on this phone</button>
+      <button class="btn plain" data-act="local">Two players, one phone</button>
       <p>${esc(note) || "You'll be asked for your camera and microphone so you can see and hear each other."}</p>
     </div>`;
 }
