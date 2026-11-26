@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=14";
+import { createNet, newRoomCode } from "./net.js?v=15";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -120,7 +120,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 14;
+const VERSION = 15;
 
 function connect() {
   if (app.net) app.net.close();
@@ -414,12 +414,25 @@ function update() {
   else if (g.pending && canAct()) { btn.textContent = "Tap a piece"; btn.disabled = true; }
   else { btn.textContent = "Throw sticks"; btn.disabled = !canAct() || !!g.pending; }
 
-  document.querySelectorAll(".cell.last").forEach((el) => el.classList.remove("last"));
-  if (g.lastMove) for (const n of [g.lastMove.from, g.lastMove.to]) {
-    const cell = n && $(`.cell[data-n="${n}"]`);
-    if (cell) cell.classList.add("last");
-  }
   syncPieces();
+
+  // Show the last move: a faint ring where the piece came from, and one soft
+  // pulse on the piece where it landed.
+  document.querySelectorAll(".cell.from").forEach((el) => el.classList.remove("from", "from-dark"));
+  const lm = g.lastMove;
+  if (lm && lm.from) {
+    const moved = lm.to ? app.pieces.find((p) => p.sq === lm.to) : null;
+    const cell = $(`.cell[data-n="${lm.from}"]`);
+    if (cell && !g.board[lm.from]) {
+      cell.classList.add("from");
+      if (moved ? moved.side === "dark" : g.colour[g.turn] !== "dark") cell.classList.add("from-dark");
+    }
+    const key = `${g.rev || 0}:${lm.from}:${lm.to}`;
+    if (moved && app.lastPulse !== key) {
+      app.lastPulse = key;
+      moved.el.classList.remove("landed"); void moved.el.offsetWidth; moved.el.classList.add("landed");
+    }
+  }
 
   document.querySelectorAll(".cell.target, .cell.target2").forEach((el) => el.classList.remove("target", "target2"));
   for (const p of app.pieces) p.el.classList.toggle("picked", !!sel && p.sq === sel.from);

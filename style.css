@@ -39,7 +39,12 @@ h1, .carved { font-family: Cinzel, Georgia, serif; font-weight: 700; }
   display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
 .cell.red { background: var(--red); color: #fff; }
 .cell.special { box-shadow: inset 0 0 0 3px var(--gold); }
-.cell.last { outline: 2px dashed var(--text); outline-offset: -5px; }
+.cell.from::before { content: ""; position: absolute; height: 62%; aspect-ratio: 1; border-radius: 50%;
+  border: 2px dashed var(--light-edge); background: rgba(243,227,189,.35); }
+.cell.from.from-dark::before { border-color: var(--dark-edge); background: rgba(23,132,126,.35); }
+.cell.special.from svg { opacity: .35; }
+.piece.landed i { animation: landed .7s ease-out; }
+@keyframes landed { 0% { transform: scale(1.35); } 60% { transform: scale(.94); } 100% { transform: none; } }
 .cell .num { position: absolute; left: 4px; top: 2px; font-size: 11px; }
 .cell svg { width: 70%; height: 70%; }
 .piece { position: absolute; pointer-events: none; display: flex; align-items: center; justify-content: center;
