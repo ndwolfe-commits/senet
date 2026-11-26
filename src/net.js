@@ -11,7 +11,7 @@
 
 const RELAYS = ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"];
 const PING_EVERY = 4000;
-const SEEN_FOR = 11000; // the other player counts as present this long after their last message
+const SEEN_FOR = 15000; // the other player counts as present this long after their last message
 const CALL_RETRY = 12000;
 const CALL_TRIES = 6;
 
@@ -48,6 +48,13 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
       let msg;
       try { msg = JSON.parse(payload.toString()); } catch (e) { return; }
       if (!msg || seenIds.has(msg.id)) return;
+      try { handle(msg, packet); } catch (e) { console.error(e); } // never let a screen error break the link
+    });
+    return c;
+  });
+
+  function handle(msg, packet) {
+    {
       seenIds.add(msg.id);
       if (seenIds.size > 500) seenIds.delete(seenIds.values().next().value);
       if (!packet.retain) { // a stored message doesn't prove they're here now
@@ -57,9 +64,8 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
         maybeCall();
       }
       onMessage(msg, { stored: !!packet.retain });
-    });
-    return c;
-  });
+    }
+  }
 
   function publish(msg, retain) {
     const body = JSON.stringify({ ...msg, id: `${tag}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}` });
@@ -79,8 +85,10 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
 
   function wake() {
     if (closed || document.visibilityState !== "visible") return;
-    for (const c of clients) if (!c.connected) c.reconnect();
+    // The relay library reconnects by itself. Forcing it here made two links
+    // with the same name knock each other off, which stalled the game.
     ping();
+    report();
     if (peer && peer.disconnected && !peer.destroyed) peer.reconnect();
   }
   document.addEventListener("visibilitychange", wake);

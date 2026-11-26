@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=12";
+import { createNet, newRoomCode } from "./net.js?v=13";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -61,8 +61,11 @@ function place(n) {
 function showHome(note = "") {
   app.inGame = false;
   const name = store.get("senet-name") || "";
-  const resuming = app.room && store.get("senet-host-room") === app.room;
-  const joining = app.room && !resuming;
+  const last = lastGame();
+  // An invite link for a game that isn't ours: offer to join it.
+  const joining = app.room && !(last && last.room === app.room);
+  const resumable = !joining && last && !last.over;
+  const opponent = resumable ? last.names[last.me === "A" ? "B" : "A"] : "";
   root.innerHTML = `
     <div class="home">
       <h1>SENET</h1>
@@ -71,8 +74,8 @@ function showHome(note = "") {
         <input id="name" maxlength="14" autocomplete="given-name" value="${esc(name)}" placeholder="Nathan">
       </label>
       ${joining ? '<button class="btn gold" data-act="guest">Join game</button>' : ""}
-      ${resuming ? '<button class="btn gold" data-act="resume">Resume your game</button>' : ""}
-      ${!joining ? `<button class="btn ${resuming ? "plain" : "gold"}" data-act="host">Play online: send a link</button>` : ""}
+      ${resumable ? `<button class="btn gold" data-act="resume">Continue game with ${esc(opponent)}</button>` : ""}
+      ${!joining ? `<button class="btn ${resumable ? "plain" : "gold"}" data-act="host">Play online: send a link</button>` : ""}
       <button class="btn plain" data-act="local">Two players on this phone</button>
       <p>${esc(note) || "You'll be asked for your camera and microphone so you can see and hear each other."}</p>
       <p>Version ${VERSION}</p>
@@ -116,7 +119,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 12;
+const VERSION = 13;
 
 function connect() {
   if (app.net) app.net.close();
@@ -152,7 +155,7 @@ function adopt(game) {
   app.game = game;
   save();
   app.net.sendState(game); // keep our stored copy on the relay up to date too
-  if (first) { if (app.mode === "guest") showGame(); } else { react(); update(); }
+  if (first) { if (app.mode === "guest" || app.game.phase !== "opening") showGame(); } else { react(); update(); }
 }
 
 function onMessage(msg, { stored }) {
@@ -178,14 +181,13 @@ async function startHost(resume) {
   app.me = "A";
   app.name = myName("Player 1");
   if (!resume) app.room = newRoomCode();
-  store.set("senet-host-room", app.room);
   history.replaceState(null, "", `?room=${app.room}${params.has("novideo") ? "&novideo=1" : ""}`);
-  let saved = null;
-  if (resume) try { saved = JSON.parse(store.get("senet-game-" + app.room)); } catch (e) { saved = null; }
-  app.game = saved || newGame({ A: app.name, B: "Player 2" });
+  app.game = (resume && savedGame(app.room)) || newGame({ A: app.name, B: "Player 2" });
+  save();
   showLobby("<p>Getting your camera ready…</p>");
   app.stream = await getMedia();
-  showInvite();
+  // Resuming a game that's already under way: go straight to the board.
+  if (resume && app.game.phase !== "opening") showGame(); else showInvite();
   connect();
 }
 
@@ -195,9 +197,17 @@ async function startGuest() {
   app.name = myName("Player 2");
   showLobby("<p>Getting your camera ready…</p>");
   app.stream = await getMedia();
-  app.game = null;
-  showLobby('<p id="lobby-note">Joining the game…</p>');
+  app.game = savedGame(app.room);
+  if (app.game) showGame(); else showLobby('<p id="lobby-note">Joining the game…</p>');
   connect();
+}
+
+// Pick up the last online game, as whichever player we were.
+function resumeLast() {
+  const last = lastGame();
+  if (!last) return showHome();
+  app.room = last.room;
+  if (last.me === "A") startHost(true); else startGuest();
 }
 
 function startLocal() {
@@ -452,8 +462,19 @@ function react() {
   for (const name of ["move", "swap", "waters", "off", "win"]) if (fx.includes(name)) sound[name]();
 }
 
+// Every change is saved on this phone, so a crash or a closed app loses nothing.
 function save() {
-  if (app.mode === "host") store.set("senet-game-" + app.room, JSON.stringify(app.game));
+  if (app.mode === "local" || !app.room || !app.game) return;
+  store.set("senet-game-" + app.room, JSON.stringify(app.game));
+  store.set("senet-last", JSON.stringify({ room: app.room, me: app.me, names: app.game.names, over: app.game.phase === "over" }));
+}
+
+function lastGame() {
+  try { return JSON.parse(store.get("senet-last")); } catch (e) { return null; }
+}
+
+function savedGame(room) {
+  try { return JSON.parse(store.get("senet-game-" + room)); } catch (e) { return null; }
 }
 
 function commit(next) {
@@ -515,7 +536,7 @@ function toggleTrack(kind, button) {
 
 const actions = {
   host: () => startHost(false),
-  resume: () => startHost(true),
+  resume: resumeLast,
   guest: startGuest,
   local: startLocal,
   rules: showRules,
