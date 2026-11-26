@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=7";
+import { createNet, newRoomCode } from "./net.js?v=8";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -115,7 +115,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 7;
+const VERSION = 8;
 
 function connect() {
   if (app.net) app.net.close();
@@ -208,6 +208,7 @@ function startLocal() {
 // ------------------------------------------------------------------ game ---
 
 function showGame() {
+  window.scrollTo(0, 0);
   app.inGame = true;
   app.pieces = [];
   const remote = app.mode !== "local";
@@ -486,5 +487,13 @@ root.addEventListener("click", (event) => {
   const button = event.target.closest("[data-act]");
   if (button && actions[button.dataset.act]) actions[button.dataset.act](button);
 });
+
+// iPhones can leave the page pushed down after the keyboard closes or the
+// phone is turned. Put it back whenever that could have happened.
+const settle = () => setTimeout(() => window.scrollTo(0, 0), 60);
+root.addEventListener("focusout", settle);
+window.addEventListener("orientationchange", settle);
+window.addEventListener("resize", settle);
+document.addEventListener("visibilitychange", settle);
 
 showHome();
