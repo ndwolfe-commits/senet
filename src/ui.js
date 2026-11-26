@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=11";
+import { createNet, newRoomCode } from "./net.js?v=12";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -116,7 +116,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 11;
+const VERSION = 12;
 
 function connect() {
   if (app.net) app.net.close();
@@ -227,7 +227,7 @@ function showGame() {
     <div class="game">
       <div class="frame"><div class="board" id="board">${cells}</div></div>
       <div class="side">
-        <div class="tile them"><div class="initial" id="them-initial"></div><video id="them-video" autoplay playsinline muted hidden></video><div class="vstat" id="vstat"></div>
+        <div class="tile them"><div class="initial" id="them-initial"></div><video id="them-video" autoplay playsinline muted hidden></video><audio id="them-audio" playsinline></audio><div class="vstat" id="vstat"></div>
           <div class="tag"><i class="dot" id="them-dot"></i><span id="them-name"></span></div>
           <button class="hear" data-act="hear" hidden>Tap to hear them</button></div>
         <div class="card status"><div class="carved" id="headline"></div><div class="sub" id="sub"></div></div>
@@ -259,18 +259,31 @@ function attachVideo() {
     video.hidden = !hasPicture;
     $(iSel).hidden = !!hasPicture;
   }
+  soundNote();
 }
 
-// Their picture starts silent, because phones refuse to start sound without a
-// tap. The first tap anywhere turns their sound on.
+// Their picture plays silently in the video tile. Their voice plays through a
+// separate audio element that carries only the sound, started by a tap,
+// because phones refuse to start sound without one.
 function wakeSound() {
-  const video = $("#them-video");
-  if (!video || !video.srcObject) return;
-  video.muted = false;
-  const playing = video.play();
-  if (playing) playing.catch(() => { video.muted = true; video.play().catch(() => {}); });
-  const hear = $(".hear");
-  if (hear) hear.hidden = true;
+  const remote = app.peerStream;
+  const audio = $("#them-audio");
+  if (!remote || !audio) return;
+  const tracks = remote.getAudioTracks();
+  if (!tracks.length) { app.sound = "none"; return soundNote(); }
+  if (!audio.srcObject || audio.srcObject.getAudioTracks()[0] !== tracks[0]) {
+    audio.srcObject = new MediaStream(tracks);
+    tracks[0].onmute = soundNote;
+    tracks[0].onunmute = soundNote;
+    app.sound = "";
+  }
+  if (app.sound === "on" && !audio.paused) return;
+  audio.muted = false;
+  audio.volume = 1;
+  const playing = audio.play();
+  const ok = () => { app.sound = "on"; soundNote(); };
+  if (playing) playing.then(ok).catch(() => { app.sound = "blocked"; soundNote(); });
+  else ok();
 }
 
 const CALL_TEXT = {
@@ -281,13 +294,41 @@ const CALL_TEXT = {
   failed: "Video blocked by the network",
 };
 
+// One line on their tile saying where video and sound have got to.
+function soundNote() {
+  const el = $("#vstat");
+  if (!el) return;
+  let text = CALL_TEXT[app.call] || "";
+  if (app.call === "connected") {
+    const track = app.peerStream && app.peerStream.getAudioTracks()[0];
+    if (!track || app.sound === "none") text = "Their microphone isn't on";
+    else if (app.sound !== "on") text = "Tap anywhere to turn sound on";
+    else if (track.muted || track.readyState === "ended") text = "No sound coming from their phone";
+  }
+  el.textContent = text;
+}
+
 function onCallState(state) {
   app.call = state;
-  const el = $("#vstat");
-  if (el) el.textContent = CALL_TEXT[state] || "";
-  const hear = $(".hear");
-  if (hear && state === "connected" && $("#them-video").muted) hear.hidden = false;
+  soundNote();
 }
+
+// Phones cut the camera and microphone when you leave the page (to send the
+// link, say). On coming back, check them and start fresh ones if they died.
+async function refreshMedia() {
+  if (!app.inGame || app.mode === "local" || !app.stream || document.visibilityState !== "visible") return;
+  await new Promise((done) => setTimeout(done, 1500));
+  const dead = app.stream.getTracks().some((t) => t.readyState === "ended" || (t.kind === "audio" && t.muted));
+  if (!dead) return;
+  const fresh = await getMedia();
+  if (!fresh) return;
+  app.stream.getTracks().forEach((t) => t.stop());
+  app.stream = fresh;
+  app.net.replaceStream(fresh);
+  document.querySelectorAll(".av button").forEach((b) => b.classList.remove("off"));
+  attachVideo();
+}
+document.addEventListener("visibilitychange", refreshMedia);
 
 const them = () => (app.me === "A" ? "B" : "A");
 const canAct = () => app.game.phase !== "over" && (app.mode === "local" || app.game.turn === app.me);

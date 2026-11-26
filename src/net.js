@@ -94,11 +94,13 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
   let callTries = 0;
   let callTimer = null;
   let peerTimer = null;
+  let currentCall = null;
 
   // Follow one call and report, in plain steps, how far it got:
   // "calling" -> "checking" -> "connected", or "failed".
   function wireCall(call) {
     if (!call) return;
+    currentCall = call;
     onCallState("calling");
     call.on("stream", (remote) => onPeerStream(remote));
     call.on("close", () => { gotRemote = false; });
@@ -152,6 +154,17 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
   return {
     // Send the game. It is stored by the relay so the other phone gets it even if it's asleep.
     sendState(game) { publish({ t: "state", game }, true); },
+    // Swap in a fresh camera and microphone (phones cut them when you leave the page).
+    replaceStream(fresh) {
+      stream = fresh;
+      const pc = currentCall && currentCall.peerConnection;
+      if (!pc) return maybeCall();
+      for (const sender of pc.getSenders()) {
+        if (!sender.track) continue;
+        const track = fresh.getTracks().find((t) => t.kind === sender.track.kind);
+        if (track) sender.replaceTrack(track).catch(() => {});
+      }
+    },
     close() {
       closed = true;
       clearInterval(pingTimer);
