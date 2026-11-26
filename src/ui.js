@@ -101,7 +101,7 @@ function showInvite() {
       <button class="btn gold" data-act="share">Send link</button>
       <button class="btn plain" data-act="copy">Copy</button>
     </div>
-    <p id="lobby-note">Waiting for them to join…</p>`);
+    <p id="lobby-note">Waiting for them to join. Keep this page open.</p>`);
 }
 
 // --------------------------------------------------------------- joining ---
@@ -125,15 +125,26 @@ function connect() {
   });
 }
 
+const LOBBY_NOTE = {
+  waiting: "Waiting for them to join. Keep this page open.",
+  joining: "Joining the game…",
+  retrying: "Still trying to reach the other phone…",
+  nohost: "The other player's game page isn't open. Ask them to go back to it.",
+  lost: "Connection lost. Trying again…",
+  error: "Connection problem. Trying again…",
+};
+
 function onStatus(status) {
   app.conn = status;
   if (status === "connected" && app.mode === "guest") {
     app.net.send({ t: "hello", name: app.name, hasMedia: !!app.stream });
   }
-  if (status === "lost" && app.mode === "guest") setTimeout(connect, 2000);
+  if (status === "connected" && app.mode === "host" && app.inGame) {
+    app.net.send({ t: "state", game: { ...app.game, fx: [] } });
+  }
   if (status === "taken") return showHome("This game is already open in another tab or phone.");
   const note = $("#lobby-note");
-  if (note && status === "nohost") note.textContent = "Waiting for the other player to open the game…";
+  if (note && LOBBY_NOTE[status]) note.textContent = LOBBY_NOTE[status];
   if (app.inGame) update();
 }
 
@@ -273,8 +284,8 @@ function update() {
   const [head, sub] = headline();
   $("#headline").textContent = head;
   const subEl = $("#sub");
-  const lost = app.mode !== "local" && app.conn === "lost";
-  subEl.textContent = app.flash || (lost ? "Connection lost. Waiting for them to come back…" : sub);
+  const lost = app.mode !== "local" && app.conn !== "connected";
+  subEl.textContent = app.flash || (lost ? "Connection lost. Trying to get it back…" : sub);
   subEl.classList.toggle("warn", !!app.flash || lost);
 
   for (const [who, key] of [[me, "me"], [op, "them"]]) {
