@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js";
+import { createNet, newRoomCode } from "./net.js?v=2";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
