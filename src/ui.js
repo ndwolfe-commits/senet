@@ -7,8 +7,9 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=16";
-import { sound } from "./sound.js";
+import { createNet, newRoomCode } from "./net.js?v=17";
+import { sound } from "./sound.js?v=17";
+import { fireworks } from "./fireworks.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -120,7 +121,7 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 16;
+const VERSION = 17;
 
 function connect() {
   if (app.net) app.net.close();
@@ -481,7 +482,51 @@ function react() {
     const el = $("#sticks");
     if (el) { el.classList.remove("toss"); void el.offsetWidth; el.classList.add("toss"); }
   }
-  for (const name of ["move", "swap", "waters", "off", "win"]) if (fx.includes(name)) sound[name]();
+  for (const name of ["move", "swap", "waters", "off"]) if (fx.includes(name)) sound[name]();
+  if (fx.includes("win")) celebrate();
+}
+
+// The winner gets fireworks. The loser gets a raspberry.
+function celebrate() {
+  const g = app.game;
+  const iWon = app.mode === "local" || g.winner === app.me;
+  const banner = document.createElement("div");
+  banner.className = `banner ${iWon ? "" : "lost"}`;
+  if (iWon) {
+    banner.innerHTML = `<div class="carved">${app.mode === "local" ? esc(g.names[g.winner]) + " wins!" : "You win!"}</div>`;
+    fireworks(root);
+    sound.win();
+  } else {
+    banner.innerHTML = `<div class="carved">Pfffffft!</div><div>${esc(g.names[g.winner])} wins.</div>`;
+    sound.raspberry();
+    cryingFace();
+  }
+  root.appendChild(banner);
+  setTimeout(() => banner.remove(), 5200);
+}
+
+// The loser's own face (their live camera) bounces around the screen in tears.
+function cryingFace(seconds = 8) {
+  const box = document.createElement("div");
+  box.className = "cry";
+  const hasCamera = app.stream && app.stream.getVideoTracks().some((t) => t.enabled && t.readyState === "live");
+  box.innerHTML = `<div class="face">${hasCamera ? "<video autoplay playsinline muted></video>"
+    : `<span class="carved">${esc((app.game.names[app.me][0] || "?").toUpperCase())}</span>`}</div>
+    <i class="tear"></i><i class="tear right"></i><i class="tear late"></i><i class="tear right late"></i>`;
+  root.appendChild(box);
+  if (hasCamera) { const v = $("video", box); v.srcObject = app.stream; v.play().catch(() => {}); }
+  const size = 124;
+  let x = 30, y = 60, vx = 2.6, vy = 2.1;
+  const start = performance.now();
+  function step(now) {
+    const w = root.clientWidth - size, h = root.clientHeight - size - 40;
+    x += vx; y += vy;
+    if (x < 0 || x > w) { vx = -vx; x = Math.max(0, Math.min(w, x)); }
+    if (y < 0 || y > h) { vy = -vy; y = Math.max(0, Math.min(h, y)); }
+    box.style.transform = `translate(${x}px, ${y}px)`;
+    if ((now - start) / 1000 < seconds && box.isConnected) requestAnimationFrame(step); else box.remove();
+  }
+  requestAnimationFrame(step);
 }
 
 // Every change is saved on this phone, so a crash or a closed app loses nothing.
@@ -621,6 +666,8 @@ async function checkForUpdate() {
     }
   } catch (e) { /* offline: carry on with this copy */ }
 }
+
+window.__senet = { app, celebrate }; // for testing from the browser console
 
 showHome();
 checkForUpdate();
