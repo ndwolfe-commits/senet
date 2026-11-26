@@ -7,7 +7,7 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=5";
+import { createNet, newRoomCode } from "./net.js?v=6";
 import { sound } from "./sound.js";
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -114,14 +114,14 @@ async function getMedia() {
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
 }
 
-const VERSION = 5;
+const VERSION = 6;
 
 function connect() {
   if (app.net) app.net.close();
   app.net = createNet({
     room: app.room,
     me: app.me,
-    getPing: () => ({ name: app.name }),
+    getPing: () => ({ name: app.name, rev: app.game ? app.game.rev || 0 : -1 }),
     stream: app.stream,
     onMessage,
     onPeerStream(remote) { app.peerStream = remote; attachVideo(); },
@@ -147,6 +147,7 @@ function adopt(game) {
   const first = !app.inGame;
   app.game = game;
   save();
+  app.net.sendState(game); // keep our stored copy on the relay up to date too
   if (first) { if (app.mode === "guest") showGame(); } else { react(); update(); }
 }
 
@@ -157,6 +158,8 @@ function onMessage(msg, { stored }) {
     return;
   }
   if (msg.t !== "ping" || stored) return;
+  // They're behind us (they reloaded, say): send them the game again.
+  if (app.game && typeof msg.rev === "number" && msg.rev < (app.game.rev || 0)) app.net.sendState(app.game);
   if (app.mode === "host") {
     // The guest is here: record their name, show the board, and send the game.
     const named = msg.name && app.game.names.B !== msg.name;
