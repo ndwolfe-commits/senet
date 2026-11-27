@@ -5,7 +5,7 @@
 // reports each as "ok", "warn" or "bad" with one plain sentence.
 // ============================================================================
 
-import { RELAYS, loadIce, hasRelay } from "./net.js?v=18";
+import { RELAYS, loadIce, hasRelay } from "./net.js?v=19";
 
 // Apps like Facebook, Instagram and some messengers open links in their own
 // cut-down browser, which often can't use the camera.
@@ -62,6 +62,11 @@ export async function runChecks(tell) {
   const app = insideAnotherApp();
   tell("browser", app ? "warn" : "ok", app ? `Opened inside ${app === "an app" ? "another app" : app}. Open it in Safari or Chrome instead.` : deviceLine());
 
+  // The network tests don't wait for the camera question to be answered.
+  await Promise.all([devices(tell), network(tell)]);
+}
+
+async function devices(tell) {
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     tell("camera", "bad", "This browser can't use the camera. Use Safari or Chrome.");
     tell("mic", "bad", "This browser can't use the microphone.");
@@ -80,6 +85,9 @@ export async function runChecks(tell) {
     }
   }
 
+}
+
+async function network(tell) {
   tell("game", (await relayReachable(7000)) ? "ok" : "bad", "");
   if (typeof RTCPeerConnection === "undefined") {
     tell("direct", "bad", "This browser can't make video calls.");

@@ -7,10 +7,10 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=18";
-import { sound } from "./sound.js?v=18";
+import { createNet, newRoomCode } from "./net.js?v=19";
+import { sound } from "./sound.js?v=19";
 import { fireworks } from "./fireworks.js";
-import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=18";
+import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=19";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -132,7 +132,7 @@ async function getMedia() {
   catch (e) { app.mediaOff = e && e.name === "NotAllowedError" ? "refused" : "missing"; return null; }
 }
 
-const VERSION = 18;
+const VERSION = 19;
 
 function connect() {
   if (app.net) app.net.close();
