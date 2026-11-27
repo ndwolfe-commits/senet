@@ -112,8 +112,12 @@ function showLobby(html) {
   root.innerHTML = `<div class="home"><h1>SENET</h1>${html}</div>`;
 }
 
+// Inside the iPhone app the page has no web address of its own, so invitations
+// point at the public web version, which anyone can open on any phone.
+const PUBLIC_URL = "https://ndwolfe-commits.github.io/senet/";
+const inApp = !/^https?:$/.test(location.protocol);
 function inviteLink() {
-  return `${location.origin}${location.pathname}?room=${app.room}`;
+  return `${inApp ? PUBLIC_URL : location.origin + location.pathname}?room=${app.room}`;
 }
 
 function showInvite() {
@@ -203,7 +207,7 @@ async function startHost(resume) {
   app.me = "A";
   app.name = myName("Player 1");
   if (!resume) app.room = newRoomCode();
-  history.replaceState(null, "", `?room=${app.room}${params.has("novideo") ? "&novideo=1" : ""}`);
+  try { history.replaceState(null, "", `?room=${app.room}${params.has("novideo") ? "&novideo=1" : ""}`); } catch (e) { /* no address bar inside the app */ }
   app.game = (resume && savedGame(app.room)) || newGame({ A: app.name, B: "Player 2" });
   save();
   showLobby("<p>Getting your camera ready…</p>");

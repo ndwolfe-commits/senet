@@ -1,0 +1,7 @@
+{
+  "appId": "net.nathanwolfe.senet",
+  "appName": "Senet",
+  "webDir": "www",
+  "backgroundColor": "#0d1a2d",
+  "ios": { "contentInset": "never", "scrollEnabled": false, "allowsLinkPreview": false }
+}
