@@ -7,10 +7,11 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=19";
-import { sound } from "./sound.js?v=19";
+import { createNet, newRoomCode } from "./net.js?v=20";
+import { sound } from "./sound.js?v=20";
 import { fireworks } from "./fireworks.js";
-import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=19";
+import { chooseMove } from "./ai.js?v=20";
+import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=20";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -70,17 +71,24 @@ function showHome(note = "") {
   const resumable = !joining && last && !last.over;
   const opponent = resumable ? last.names[last.me === "A" ? "B" : "A"] : "";
   const otherApp = insideAnotherApp();
+  const solo = soloGame();
+  const soloSaved = !joining && solo && solo.game && solo.game.phase !== "over";
+  clearTimeout(app.aiTimer);
   root.innerHTML = `
     <div class="home">
       <h1>SENET</h1>
-      <p>${joining ? "You've been invited to a game." : "The game of passing, for two players."}</p>
+      <p>${joining ? "You've been invited to a game." : "The game of passing."}</p>
       <label class="field">Your name
         <input id="name" maxlength="14" autocomplete="given-name" value="${esc(name)}" placeholder="Nathan">
       </label>
       ${joining ? '<button class="btn gold" data-act="guest">Join game</button>' : ""}
       ${resumable ? `<button class="btn gold" data-act="resume">Continue game with ${esc(opponent)}</button>` : ""}
       ${!joining ? `<button class="btn ${resumable ? "plain" : "gold"}" data-act="host">Play online: send a link</button>` : ""}
-      <button class="btn plain" data-act="local">Two players on this phone</button>
+      ${soloSaved ? `<button class="btn plain" data-act="solo-resume">Continue against the computer</button>` : ""}
+      <div class="row">
+        <button class="btn plain" data-act="solo-pick">Play the computer</button>
+        <button class="btn plain" data-act="local">Two players, one phone</button>
+      </div>
       <div class="row">
         <button class="btn plain" data-act="film">How to play: 3-minute film</button>
         <button class="btn plain" data-act="check">Check my connection</button>
@@ -132,7 +140,7 @@ async function getMedia() {
   catch (e) { app.mediaOff = e && e.name === "NotAllowedError" ? "refused" : "missing"; return null; }
 }
 
-const VERSION = 19;
+const VERSION = 20;
 
 function connect() {
   if (app.net) app.net.close();
@@ -191,6 +199,7 @@ function onMessage(msg, { stored }) {
 
 async function startHost(resume) {
   app.mode = "host";
+  app.solo = null;
   app.me = "A";
   app.name = myName("Player 1");
   if (!resume) app.room = newRoomCode();
@@ -206,6 +215,7 @@ async function startHost(resume) {
 
 async function startGuest() {
   app.mode = "guest";
+  app.solo = null;
   app.me = "B";
   app.name = myName("Player 2");
   showLobby("<p>Getting your camera ready…</p>");
@@ -225,9 +235,52 @@ function resumeLast() {
 
 function startLocal() {
   app.mode = "local";
+  app.solo = null;
+  app.me = "A";
   app.name = myName("Player 1");
   app.game = newGame({ A: app.name, B: "Player 2" });
   showGame();
+}
+
+// ------------------------------------------------- against the computer ---
+// You are always player A; the computer is player B and plays by itself.
+
+function pickLevel() {
+  app.name = myName("You");
+  showLobby(`<p>How strong should the computer be?</p>
+    <button class="btn plain" data-act="solo" data-level="easy">Easy</button>
+    <button class="btn plain" data-act="solo" data-level="medium">Medium</button>
+    <button class="btn plain" data-act="solo" data-level="hard">Hard</button>
+    <button class="btn plain" data-act="home">Back</button>`);
+}
+
+function startSolo(level, saved) {
+  if (app.net) { app.net.close(); app.net = null; }
+  app.mode = "local";
+  app.solo = level;
+  app.me = "A";
+  app.game = saved || newGame({ A: app.name || "You", B: "Computer" });
+  save();
+  showGame();
+  soloStep();
+}
+
+function soloGame() {
+  try { return JSON.parse(store.get("senet-solo")); } catch (e) { return null; }
+}
+
+// When it is the computer's turn, it throws, pauses, then moves, at a pace you can follow.
+function soloStep() {
+  clearTimeout(app.aiTimer);
+  if (!app.solo || !app.inGame) return;
+  const g = app.game;
+  if (g.phase === "over" || g.turn !== "B") return;
+  app.aiTimer = setTimeout(() => {
+    const now = app.game;
+    if (!app.solo || !app.inGame || now.phase === "over" || now.turn !== "B") return;
+    if (!now.pending) return commit(throwSticks(now));
+    commit(applyMove(now, chooseMove(now, app.solo)));
+  }, g.pending ? 1400 : 1000);
 }
 
 // ------------------------------------------------------------------ game ---
@@ -366,11 +419,12 @@ async function refreshMedia() {
 document.addEventListener("visibilitychange", refreshMedia);
 
 const them = () => (app.me === "A" ? "B" : "A");
-const canAct = () => app.game.phase !== "over" && (app.mode === "local" || app.game.turn === app.me);
+const twoOnOne = () => app.mode === "local" && !app.solo; // two people sharing this phone
+const canAct = () => app.game.phase !== "over" && (twoOnOne() || app.game.turn === app.me);
 
 function headline() {
   const g = app.game;
-  const local = app.mode === "local";
+  const local = twoOnOne();
   const turnName = g.names[g.turn];
   if (g.phase === "over") return [local || g.winner !== app.me ? `${g.names[g.winner]} wins` : "You win", "Tap New game to play again."];
   const mine = !local && g.turn === app.me;
@@ -412,7 +466,7 @@ function update() {
 
   for (const [who, key] of [[me, "me"], [op, "them"]]) {
     const side = g.colour[who];
-    $(`#${key}-name`).textContent = g.names[who] + (app.mode !== "local" && who === me ? " (you)" : "");
+    $(`#${key}-name`).textContent = g.names[who] + (!twoOnOne() && who === me ? " (you)" : "");
     $(`#${key}-dot`).className = `dot ${side === "dark" ? "dark" : side ? "" : "none"}`;
     $(`#${key}-initial`).textContent = (g.names[who][0] || "?").toUpperCase();
     $(`#off-${key}-label`).textContent = `${g.names[who]} off`;
@@ -504,11 +558,11 @@ function react() {
 // The winner gets fireworks. The loser gets a raspberry.
 function celebrate() {
   const g = app.game;
-  const iWon = app.mode === "local" || g.winner === app.me;
+  const iWon = twoOnOne() || g.winner === app.me;
   const banner = document.createElement("div");
   banner.className = `banner ${iWon ? "" : "lost"}`;
   if (iWon) {
-    banner.innerHTML = `<div class="carved">${app.mode === "local" ? esc(g.names[g.winner]) + " wins!" : "You win!"}</div>`;
+    banner.innerHTML = `<div class="carved">${twoOnOne() ? esc(g.names[g.winner]) + " wins!" : "You win!"}</div>`;
     fireworks(root);
     sound.win();
   } else {
@@ -546,6 +600,7 @@ function cryingFace(seconds = 8) {
 
 // Every change is saved on this phone, so a crash or a closed app loses nothing.
 function save() {
+  if (app.solo && app.game) return store.set("senet-solo", JSON.stringify({ level: app.solo, game: app.game }));
   if (app.mode === "local" || !app.room || !app.game) return;
   store.set("senet-game-" + app.room, JSON.stringify(app.game));
   store.set("senet-last", JSON.stringify({ room: app.room, me: app.me, names: app.game.names, over: app.game.phase === "over" }));
@@ -568,6 +623,7 @@ function commit(next) {
   if (app.net) app.net.sendState(next);
   react();
   update();
+  soloStep();
 }
 
 // Tap any piece to see where it would go; tap others to compare. Nothing moves
@@ -670,6 +726,10 @@ const actions = {
   resume: resumeLast,
   guest: startGuest,
   local: startLocal,
+  "solo-pick": pickLevel,
+  solo: (button) => startSolo(button.dataset.level),
+  "solo-resume": () => { const s = soloGame(); if (!s) return showHome(); app.name = s.game.names.A; startSolo(s.level, s.game); },
+  home: () => showHome(),
   rules: showRules,
   "close-rules": () => { const v = $(".sheet video"); if (v) v.pause(); $(".sheet").remove(); },
   film: showFilm,
