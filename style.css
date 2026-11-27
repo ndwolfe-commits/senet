@@ -142,3 +142,26 @@ input { -webkit-user-select: text; user-select: text; }
 .sheet p { margin: 0; color: var(--soft); font-size: 15px; line-height: 1.4; }
 .warnbox { background: #3a2a12; border: 1px solid var(--gold); border-radius: 12px; padding: 12px; font-size: 15px; line-height: 1.4; display: flex; flex-direction: column; gap: 10px; }
 .home .row .btn { font-size: 15px; min-height: 52px; }
+
+/* ---------- board-only layout and typed messages ---------- */
+.btn.small { min-height: 44px; font-size: 14px; }
+.side.clean .tile { flex: none; min-height: 34px; }
+.side.clean .tile.me { min-height: 34px; }
+.side.clean .tile:has(.av button:not([hidden])) { min-height: 58px; }
+.side.clean .tile .initial, .side.clean .tile video { display: none; }
+.side.clean { justify-content: center; }
+.side.clean .vstat { position: static; margin: 30px 6px 6px; }
+.av button[hidden] { display: none; }
+.av button.unread { background: var(--gold); color: var(--ink); }
+.bubble { position: absolute; left: 6px; right: 6px; bottom: 6px; z-index: 2; border: none; border-radius: 12px 12px 12px 2px; background: var(--text); color: var(--ink); font-size: 14px; line-height: 1.3; padding: 8px 10px; text-align: left; max-height: 70%; overflow: hidden; }
+.side.clean .bubble { position: static; margin: 30px 6px 6px; display: block; }
+.bubble[hidden] { display: none !important; }
+.sheet.chat { gap: 10px; }
+.chat-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 80px; }
+.msg { align-self: flex-start; max-width: 85%; background: var(--panel); border-radius: 12px 12px 12px 2px; padding: 7px 10px; font-size: 15px; line-height: 1.3; }
+.msg.mine { align-self: flex-end; background: #2c4a78; border-radius: 12px 12px 2px 12px; }
+.msg small { display: block; color: var(--soft); font-size: 11px; }
+.quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick button { border: 1px solid #3a557f; background: var(--panel); border-radius: 999px; padding: 8px 12px; font-size: 14px; min-height: 40px; }
+#chat-input { flex: 3; min-height: 52px; border-radius: 12px; border: 1px solid #3a557f; background: var(--panel); color: var(--text); font-size: 16px; padding: 0 12px; }
+.btn.send { flex: 1; min-height: 52px; }

@@ -186,6 +186,8 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
   return {
     // Send the game. It is stored by the relay so the other phone gets it even if it's asleep.
     sendState(game) { publish({ t: "state", game }, true); },
+    // A short typed message. Not stored: it only reaches a player who is there.
+    sendChat(text) { publish({ t: "chat", text }); },
     // Swap in a fresh camera and microphone (phones cut them when you leave the page).
     replaceStream(fresh) {
       stream = fresh;

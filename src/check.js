@@ -5,7 +5,7 @@
 // reports each as "ok", "warn" or "bad" with one plain sentence.
 // ============================================================================
 
-import { RELAYS, loadIce, hasRelay } from "./net.js?v=20";
+import { RELAYS, loadIce, hasRelay } from "./net.js?v=21";
 
 // Apps like Facebook, Instagram and some messengers open links in their own
 // cut-down browser, which often can't use the camera.

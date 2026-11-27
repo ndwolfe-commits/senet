@@ -7,11 +7,11 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=20";
-import { sound } from "./sound.js?v=20";
+import { createNet, newRoomCode } from "./net.js?v=21";
+import { sound } from "./sound.js?v=21";
 import { fireworks } from "./fireworks.js";
-import { chooseMove } from "./ai.js?v=20";
-import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=20";
+import { chooseMove } from "./ai.js?v=21";
+import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=21";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -41,6 +41,7 @@ const root = $("#app");
 
 const ICON = {
   mic: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+  chat: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-5 4z"/></svg>',
   eye: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   cam: '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 11l6-3v8l-6-3"/></svg>',
 };
@@ -95,7 +96,8 @@ function showHome(note = "") {
       </div>
       ${otherApp ? `<div class="warnbox">This page is open inside ${otherApp === "an app" ? "another app" : esc(otherApp)}, where the camera often doesn't work. Open it in ${/Android/.test(navigator.userAgent) ? "Chrome" : "Safari"} instead.
         <div class="row"><button class="btn gold" data-act="open-out">Open in ${/Android/.test(navigator.userAgent) ? "Chrome" : "Safari"}</button><button class="btn plain" data-act="copy-here">Copy link</button></div></div>` : ""}
-      <p id="home-note">${esc(note) || "You'll be asked for your camera and microphone so you can see and hear each other."}</p>
+      <button class="btn plain small" data-act="faces">${facesOff() ? "Faces and voice: off. Board only." : "Faces and voice: on"}</button>
+      <p id="home-note">${esc(note) || (facesOff() ? "Online games will be board only. You can still send typed messages." : "You'll be asked for your camera and microphone so you can see and hear each other.")}</p>
       <p>Version ${VERSION}</p>
     </div>`;
 }
@@ -130,17 +132,19 @@ function showInvite() {
 
 // --------------------------------------------------------------- joining ---
 
+const facesOff = () => store.get("senet-faces") === "off";
+
 async function getMedia() {
-  if (params.has("novideo")) return null;
+  app.mediaOff = "";
+  if (params.has("novideo") || facesOff()) return null;
   if (!navigator.mediaDevices) { app.mediaOff = "missing"; return null; }
   const video = { facingMode: "user", width: { ideal: 480 }, height: { ideal: 480 } };
-  app.mediaOff = "";
   try { return await navigator.mediaDevices.getUserMedia({ audio: true, video }); } catch (e) { /* try sound only */ }
   try { return await navigator.mediaDevices.getUserMedia({ audio: true }); }
   catch (e) { app.mediaOff = e && e.name === "NotAllowedError" ? "refused" : "missing"; return null; }
 }
 
-const VERSION = 20;
+const VERSION = 21;
 
 function connect() {
   if (app.net) app.net.close();
@@ -185,6 +189,7 @@ function onMessage(msg, { stored }) {
     if ((msg.game.rev || 0) > mine) adopt(msg.game);
     return;
   }
+  if (msg.t === "chat" && !stored && typeof msg.text === "string") return gotChat(msg.text.slice(0, 200));
   if (msg.t !== "ping" || stored) return;
   // They're behind us (they reloaded, say): send them the game again.
   if (app.game && typeof msg.rev === "number" && msg.rev < (app.game.rev || 0)) app.net.sendState(app.game);
@@ -206,7 +211,8 @@ async function startHost(resume) {
   history.replaceState(null, "", `?room=${app.room}${params.has("novideo") ? "&novideo=1" : ""}`);
   app.game = (resume && savedGame(app.room)) || newGame({ A: app.name, B: "Player 2" });
   save();
-  showLobby("<p>Getting your camera ready…</p>");
+  showLobby(facesOff() ? "<p>Starting…</p>" : "<p>Getting your camera ready…</p>");
+  app.chat = [];
   app.stream = await getMedia();
   // Resuming a game that's already under way: go straight to the board.
   if (resume && app.game.phase !== "opening") showGame(); else showInvite();
@@ -218,7 +224,8 @@ async function startGuest() {
   app.solo = null;
   app.me = "B";
   app.name = myName("Player 2");
-  showLobby("<p>Getting your camera ready…</p>");
+  showLobby(facesOff() ? "<p>Starting…</p>" : "<p>Getting your camera ready…</p>");
+  app.chat = [];
   app.stream = await getMedia();
   app.game = savedGame(app.room);
   if (app.game) showGame(); else showLobby('<p id="lobby-note">Joining the game…</p>');
@@ -303,7 +310,7 @@ function showGame() {
     <div class="game">
       <div class="frame"><div class="board" id="board">${cells}</div></div>
       <div class="side">
-        <div class="tile them"><div class="initial" id="them-initial"></div><video id="them-video" autoplay playsinline muted hidden></video><audio id="them-audio" playsinline></audio><div class="vstat" id="vstat"></div>
+        <div class="tile them"><div class="initial" id="them-initial"></div><video id="them-video" autoplay playsinline muted hidden></video><audio id="them-audio" playsinline></audio><div class="vstat" id="vstat"></div><button class="bubble" id="bubble" data-act="chat" hidden></button>
           <div class="tag"><i class="dot" id="them-dot"></i><span id="them-name"></span></div>
           <button class="hear" data-act="hear" hidden>Tap to hear them</button></div>
         <div class="card status"><div class="carved" id="headline"></div><div class="sub" id="sub"></div></div>
@@ -312,7 +319,7 @@ function showGame() {
         <div class="card off"><div><span id="off-me-label"></span><span id="off-me"></span></div><div><span id="off-them-label"></span><span id="off-them"></span></div></div>
         <div class="tile me"><div class="initial" id="me-initial"></div><video id="me-video" autoplay playsinline muted hidden></video>
           <div class="tag"><i class="dot" id="me-dot"></i><span id="me-name"></span></div>
-          ${remote ? `<div class="av"><button data-act="mic" aria-label="Mute microphone">${ICON.mic}</button><button data-act="cam" aria-label="Turn camera off">${ICON.cam}</button><button data-act="selfview" aria-label="Hide my own picture from me">${ICON.eye}</button></div>` : ""}
+          ${remote ? `<div class="av"><button data-act="chat" id="chat-btn" aria-label="Send a typed message">${ICON.chat}</button><button data-act="mic" aria-label="Mute microphone">${ICON.mic}</button><button data-act="cam" aria-label="Turn camera off">${ICON.cam}</button><button data-act="selfview" aria-label="Hide my own picture from me">${ICON.eye}</button></div>` : ""}
         </div>
       </div>
     </div>`;
@@ -337,6 +344,10 @@ function attachVideo() {
     video.hidden = !show;
     $(iSel).hidden = !!show;
   }
+  // No pictures at all (board-only game, the computer, or two on one phone): shrink the tiles to name bars.
+  const anyPicture = pairs.some(([, , stream]) => stream && stream.getVideoTracks().length > 0);
+  $(".side").classList.toggle("clean", !anyPicture);
+  for (const act of ["mic", "cam", "selfview"]) { const b = $(`[data-act="${act}"]`); if (b) b.hidden = !app.stream || (act !== "mic" && !app.stream.getVideoTracks().length); }
   const eye = $('[data-act="selfview"]');
   if (eye) {
     const hidden = store.get("senet-hide-self") === "1";
@@ -390,6 +401,7 @@ function soundNote() {
     else if (app.sound !== "on") text = "Tap anywhere to turn sound on";
     else if (track.muted || track.readyState === "ended") text = "No sound coming from their phone";
   }
+  if (app.call === "blocked") text += " Tap the speech bubble to type to them.";
   if (!text && app.mediaOff && app.mode !== "local") {
     text = app.mediaOff === "refused" ? "Your camera and mic are not allowed. Allow them in your browser settings, then reload." : "Your camera and mic aren't available in this browser.";
   }
@@ -711,6 +723,56 @@ async function copyText(text, where, done) {
   catch (e) { if (where) where.textContent = "Couldn't copy. Press and hold the text to copy it."; }
 }
 
+// ------------------------------------------------------- typed messages ---
+// A fallback for when faces and voice can't connect, or are switched off.
+const QUICK = ["Good move!", "Your turn", "I can't hear you", "Back in a minute", "Ha!"];
+
+function gotChat(text) {
+  app.chat = (app.chat || []).concat({ mine: false, text }).slice(-40);
+  sound.move();
+  if ($("#chat-list")) return drawChat();
+  const bubble = $("#bubble");
+  if (!bubble) return;
+  bubble.textContent = text;
+  bubble.hidden = false;
+  clearTimeout(app.bubbleTimer);
+  app.bubbleTimer = setTimeout(() => { bubble.hidden = true; }, 9000);
+  const btn = $("#chat-btn");
+  if (btn) btn.classList.add("unread");
+}
+
+function drawChat() {
+  const list = $("#chat-list");
+  if (!list) return;
+  const them = app.game.names[app.me === "A" ? "B" : "A"];
+  list.innerHTML = (app.chat || []).map((m) => `<div class="msg ${m.mine ? "mine" : ""}"><small>${m.mine ? "You" : esc(them)}</small>${esc(m.text)}</div>`).join("")
+    || "<p>No messages yet.</p>";
+  list.scrollTop = list.scrollHeight;
+}
+
+function showChat() {
+  const old = $(".sheet"); if (old) old.remove();
+  const bubble = $("#bubble"); if (bubble) bubble.hidden = true;
+  const btn = $("#chat-btn"); if (btn) btn.classList.remove("unread");
+  const sheet = document.createElement("div");
+  sheet.className = "sheet chat";
+  sheet.innerHTML = `<h2>Messages</h2><div class="chat-list" id="chat-list"></div>
+    <div class="quick">${QUICK.map((q) => `<button data-act="chat-quick">${esc(q)}</button>`).join("")}</div>
+    <div class="row"><input id="chat-input" maxlength="200" placeholder="Type a message" autocomplete="off" enterkeyhint="send"><button class="btn gold send" data-act="chat-send">Send</button></div>
+    <button class="btn plain" data-act="close-rules">Back to the game</button>`;
+  root.appendChild(sheet);
+  drawChat();
+}
+
+function sendChat(text) {
+  text = (text || "").trim().slice(0, 200);
+  if (!text || !app.net) return;
+  app.net.sendChat(text);
+  app.chat = (app.chat || []).concat({ mine: true, text }).slice(-40);
+  const input = $("#chat-input"); if (input) input.value = "";
+  drawChat();
+}
+
 function toggleTrack(kind, button) {
   if (!app.stream) return setFlash("Camera and microphone are off for this game.");
   const tracks = kind === "mic" ? app.stream.getAudioTracks() : app.stream.getVideoTracks();
@@ -733,6 +795,10 @@ const actions = {
   rules: showRules,
   "close-rules": () => { const v = $(".sheet video"); if (v) v.pause(); $(".sheet").remove(); },
   film: showFilm,
+  chat: showChat,
+  "chat-send": () => sendChat($("#chat-input").value),
+  "chat-quick": (button) => sendChat(button.textContent),
+  faces: () => { const name = ($("#name") || {}).value; store.set("senet-faces", facesOff() ? "on" : "off"); if (name) store.set("senet-name", name.trim()); showHome(); },
   check: showCheck,
   "copy-check": () => copyText(app.checkText || "Still testing.", $("#check-sum"), "Results copied. Paste them into a message."),
   "copy-here": () => copyText(location.href, $("#home-note"), "Link copied. Paste it into Safari or Chrome."),
@@ -778,6 +844,10 @@ root.addEventListener("click", (event) => {
   if (button && actions[button.dataset.act]) actions[button.dataset.act](button);
 });
 
+root.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.target.id === "chat-input") sendChat(event.target.value);
+});
+
 // iPhones can leave the page pushed down after the keyboard closes or the
 // phone is turned. Put it back whenever that could have happened.
 const settle = () => setTimeout(() => window.scrollTo(0, 0), 60);
@@ -800,7 +870,7 @@ async function checkForUpdate() {
   } catch (e) { /* offline: carry on with this copy */ }
 }
 
-window.__senet = { app, celebrate }; // for testing from the browser console
+window.__senet = { app, celebrate, gotChat }; // for testing from the browser console
 
 showHome();
 checkForUpdate();
