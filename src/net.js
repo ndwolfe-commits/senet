@@ -9,20 +9,37 @@
 // networks block a direct link, the game still works without the picture.
 // ============================================================================
 
-const RELAYS = ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"];
+export const RELAYS = ["wss://broker.emqx.io:8084/mqtt", "wss://broker.hivemq.com:8884/mqtt"];
 const PING_EVERY = 4000;
 const SEEN_FOR = 15000; // the other player counts as present this long after their last message
 const CALL_RETRY = 12000;
 const CALL_TRIES = 6;
 
 // Servers that help two phones find a route to each other for video.
-const ICE = {
-  iceServers: [
-    { urls: ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] },
-    { urls: ["turn:eu-0.turn.peerjs.com:3478", "turn:us-0.turn.peerjs.com:3478"], username: "peerjs", credential: "peerjsp" },
-    { urls: ["turn:openrelay.metered.ca:80", "turn:openrelay.metered.ca:443", "turns:openrelay.metered.ca:443?transport=tcp"], username: "openrelayproject", credential: "openrelayproject" },
-  ],
-};
+// STUN servers find a direct path. When the two networks block a direct path
+// (many mobile networks, hotel and office WiFi), the call needs a relay (TURN).
+// RELAY_URL is a small web address that hands out short-lived relay passes;
+// leave it empty and the app uses direct paths only.
+export const RELAY_URL = "";
+const ICE = { iceServers: [{ urls: ["stun:stun.l.google.com:19302", "stun:stun.cloudflare.com:3478"] }] };
+let iceLoaded = null;
+export function loadIce() {
+  if (iceLoaded) return iceLoaded;
+  iceLoaded = (async () => {
+    if (!RELAY_URL) return ICE;
+    try {
+      const stop = new AbortController();
+      const timer = setTimeout(() => stop.abort(), 4000);
+      const res = await fetch(RELAY_URL, { signal: stop.signal, cache: "no-store" });
+      clearTimeout(timer);
+      const extra = (await res.json()).iceServers;
+      if (extra) ICE.iceServers = ICE.iceServers.concat(extra);
+    } catch (e) { /* no relay this time: direct paths only */ }
+    return ICE;
+  })();
+  return iceLoaded;
+}
+export const hasRelay = () => ICE.iceServers.some((s) => [].concat(s.urls).some((u) => u.startsWith("turn")));
 
 export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, onStatus, onCallState = () => {} }) {
   const other = me === "A" ? "B" : "A";
@@ -119,7 +136,7 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
       const report = () => {
         const state = pc.iceConnectionState;
         if (state === "connected" || state === "completed") { gotRemote = true; callTries = 0; onCallState("connected"); }
-        else if (state === "failed") { gotRemote = false; onCallState("failed"); try { call.close(); } catch (e) { /* gone */ } maybeCall(); }
+        else if (state === "failed") { gotRemote = false; onCallState(callTries >= CALL_TRIES ? "blocked" : "failed"); try { call.close(); } catch (e) { /* gone */ } maybeCall(); }
         else if (state === "disconnected") { onCallState("dropped"); }
         else onCallState("checking");
       };
@@ -164,7 +181,7 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
     callTimer = setTimeout(() => { callTimer = null; maybeCall(); }, CALL_RETRY);
   }
 
-  startPeer(); // even without a camera we can still receive theirs
+  loadIce().then(startPeer); // even without a camera we can still receive theirs
 
   return {
     // Send the game. It is stored by the relay so the other phone gets it even if it's asleep.

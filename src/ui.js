@@ -7,9 +7,10 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=17";
-import { sound } from "./sound.js?v=17";
+import { createNet, newRoomCode } from "./net.js?v=18";
+import { sound } from "./sound.js?v=18";
 import { fireworks } from "./fireworks.js";
+import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=18";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -68,6 +69,7 @@ function showHome(note = "") {
   const joining = app.room && !(last && last.room === app.room);
   const resumable = !joining && last && !last.over;
   const opponent = resumable ? last.names[last.me === "A" ? "B" : "A"] : "";
+  const otherApp = insideAnotherApp();
   root.innerHTML = `
     <div class="home">
       <h1>SENET</h1>
@@ -79,7 +81,13 @@ function showHome(note = "") {
       ${resumable ? `<button class="btn gold" data-act="resume">Continue game with ${esc(opponent)}</button>` : ""}
       ${!joining ? `<button class="btn ${resumable ? "plain" : "gold"}" data-act="host">Play online: send a link</button>` : ""}
       <button class="btn plain" data-act="local">Two players on this phone</button>
-      <p>${esc(note) || "You'll be asked for your camera and microphone so you can see and hear each other."}</p>
+      <div class="row">
+        <button class="btn plain" data-act="film">How to play: 3-minute film</button>
+        <button class="btn plain" data-act="check">Check my connection</button>
+      </div>
+      ${otherApp ? `<div class="warnbox">This page is open inside ${otherApp === "an app" ? "another app" : esc(otherApp)}, where the camera often doesn't work. Open it in ${/Android/.test(navigator.userAgent) ? "Chrome" : "Safari"} instead.
+        <div class="row"><button class="btn gold" data-act="open-out">Open in ${/Android/.test(navigator.userAgent) ? "Chrome" : "Safari"}</button><button class="btn plain" data-act="copy-here">Copy link</button></div></div>` : ""}
+      <p id="home-note">${esc(note) || "You'll be asked for your camera and microphone so you can see and hear each other."}</p>
       <p>Version ${VERSION}</p>
     </div>`;
 }
@@ -115,13 +123,16 @@ function showInvite() {
 // --------------------------------------------------------------- joining ---
 
 async function getMedia() {
-  if (params.has("novideo") || !navigator.mediaDevices) return null;
+  if (params.has("novideo")) return null;
+  if (!navigator.mediaDevices) { app.mediaOff = "missing"; return null; }
   const video = { facingMode: "user", width: { ideal: 480 }, height: { ideal: 480 } };
+  app.mediaOff = "";
   try { return await navigator.mediaDevices.getUserMedia({ audio: true, video }); } catch (e) { /* try sound only */ }
-  try { return await navigator.mediaDevices.getUserMedia({ audio: true }); } catch (e) { return null; }
+  try { return await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { app.mediaOff = e && e.name === "NotAllowedError" ? "refused" : "missing"; return null; }
 }
 
-const VERSION = 17;
+const VERSION = 18;
 
 function connect() {
   if (app.net) app.net.close();
@@ -311,7 +322,8 @@ const CALL_TEXT = {
   checking: "Connecting video…",
   connected: "",
   dropped: "Video dropped. Reconnecting…",
-  failed: "Video blocked by the network",
+  failed: "Faces not connecting. Trying again…",
+  blocked: "Faces can't connect on this network. The game still works.",
 };
 
 // One line on their tile saying where video and sound have got to.
@@ -324,6 +336,9 @@ function soundNote() {
     if (!track || app.sound === "none") text = "Their microphone isn't on";
     else if (app.sound !== "on") text = "Tap anywhere to turn sound on";
     else if (track.muted || track.readyState === "ended") text = "No sound coming from their phone";
+  }
+  if (!text && app.mediaOff && app.mode !== "local") {
+    text = app.mediaOff === "refused" ? "Your camera and mic are not allowed. Allow them in your browser settings, then reload." : "Your camera and mic aren't available in this browser.";
   }
   el.textContent = text;
 }
@@ -587,8 +602,57 @@ function showRules() {
   const sheet = document.createElement("div");
   sheet.className = "sheet";
   sheet.innerHTML = `<h2>Rules</h2><ol>${rulesSummary().map((line) => `<li>${esc(line)}</li>`).join("")}</ol>
+    <button class="btn plain" data-act="film">Watch the 3-minute film</button>
     <button class="btn gold" data-act="close-rules">Back to the game</button>`;
   root.appendChild(sheet);
+}
+
+function showFilm() {
+  const old = $(".sheet"); if (old) old.remove();
+  const sheet = document.createElement("div");
+  sheet.className = "sheet film";
+  sheet.innerHTML = `<video src="film.mp4?v=${VERSION}" poster="film-poster.jpg" controls playsinline preload="metadata"></video>
+    <button class="btn gold" data-act="close-rules">${app.inGame ? "Back to the game" : "Back"}</button>`;
+  root.appendChild(sheet);
+  const playing = $("video", sheet).play();
+  if (playing) playing.catch(() => {});
+}
+
+const CHECKS = [["browser", "Browser"], ["camera", "Camera"], ["mic", "Microphone"], ["game", "Game link"], ["direct", "Faces: direct path"], ["relay", "Faces: relay for difficult networks"]];
+const MARK = { ok: "✓", warn: "!", bad: "✕", wait: "…" };
+function showCheck() {
+  const sheet = document.createElement("div");
+  sheet.className = "sheet";
+  sheet.innerHTML = `<h2>Connection check</h2>
+    <div class="checks">${CHECKS.map(([key, label]) => `<div class="check wait" data-check="${key}"><b>${MARK.wait}</b><div><span>${label}</span><small></small></div></div>`).join("")}</div>
+    <p id="check-sum">Testing… this takes about 20 seconds.</p>
+    <div class="row"><button class="btn plain" data-act="copy-check">Copy results</button><button class="btn gold" data-act="close-rules">Back</button></div>`;
+  root.appendChild(sheet);
+  const got = {};
+  runChecks((key, state, text) => {
+    got[key] = { state, text };
+    const row = $(`[data-check="${key}"]`, sheet);
+    if (!row) return;
+    row.className = `check ${state}`;
+    $("b", row).textContent = MARK[state];
+    $("small", row).textContent = text;
+  }).then(() => {
+    const bad = (k) => got[k] && got[k].state === "bad";
+    const sum = $("#check-sum", sheet);
+    if (!sum) return;
+    sum.textContent = bad("game") ? "The game itself can't connect from here. Try another network."
+      : bad("camera") || bad("mic") ? "You can play, but the other player won't see or hear you until the camera and microphone are allowed."
+      : got.browser.state === "warn" ? "Open this page in Safari or Chrome for faces and voice."
+      : got.direct.state !== "ok" && got.relay.state !== "ok" ? "You can play, but this network will probably block faces and voice."
+      : got.relay.state !== "ok" ? "Ready to play. Faces and voice should work on this network, but may not if the other player's network is strict."
+      : "Everything works.";
+    app.checkText = `Senet v${VERSION} check (${deviceLine()})\n` + CHECKS.map(([key, label]) => `${MARK[got[key].state]} ${label}${got[key].text ? ": " + got[key].text : ""}`).join("\n") + `\n${sum.textContent}`;
+  });
+}
+
+async function copyText(text, where, done) {
+  try { await navigator.clipboard.writeText(text); if (where) where.textContent = done; }
+  catch (e) { if (where) where.textContent = "Couldn't copy. Press and hold the text to copy it."; }
 }
 
 function toggleTrack(kind, button) {
@@ -607,7 +671,16 @@ const actions = {
   guest: startGuest,
   local: startLocal,
   rules: showRules,
-  "close-rules": () => $(".sheet").remove(),
+  "close-rules": () => { const v = $(".sheet video"); if (v) v.pause(); $(".sheet").remove(); },
+  film: showFilm,
+  check: showCheck,
+  "copy-check": () => copyText(app.checkText || "Still testing.", $("#check-sum"), "Results copied. Paste them into a message."),
+  "copy-here": () => copyText(location.href, $("#home-note"), "Link copied. Paste it into Safari or Chrome."),
+  // Hand the page over to the phone's real browser.
+  "open-out": () => {
+    const rest = location.host + location.pathname + location.search;
+    location.href = /Android/.test(navigator.userAgent) ? `intent://${rest}#Intent;scheme=https;package=com.android.chrome;end` : `x-safari-https://${rest}`;
+  },
   hear: () => wakeSound(),
   selfview: () => {
     const hidden = store.get("senet-hide-self") === "1";
