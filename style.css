@@ -165,3 +165,7 @@ input { -webkit-user-select: text; user-select: text; }
 .quick button { border: 1px solid #3a557f; background: var(--panel); border-radius: 999px; padding: 8px 12px; font-size: 14px; min-height: 40px; }
 #chat-input { flex: 3; min-height: 52px; border-radius: 12px; border: 1px solid #3a557f; background: var(--panel); color: var(--text); font-size: 16px; padding: 0 12px; }
 .btn.send { flex: 1; min-height: 52px; }
+
+/* ---------- menu ---------- */
+.topbtns { display: flex; gap: 14px; }
+.sheet.menu { justify-content: center; }

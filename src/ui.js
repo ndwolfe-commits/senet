@@ -7,11 +7,11 @@
 
 import { RULES, rulesSummary } from "./rules.js";
 import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=21";
-import { sound } from "./sound.js?v=21";
+import { createNet, newRoomCode } from "./net.js?v=22";
+import { sound } from "./sound.js?v=22";
 import { fireworks } from "./fireworks.js";
-import { chooseMove } from "./ai.js?v=21";
-import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=21";
+import { chooseMove } from "./ai.js?v=22";
+import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=22";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -144,7 +144,7 @@ async function getMedia() {
   catch (e) { app.mediaOff = e && e.name === "NotAllowedError" ? "refused" : "missing"; return null; }
 }
 
-const VERSION = 21;
+const VERSION = 22;
 
 function connect() {
   if (app.net) app.net.close();
@@ -253,7 +253,8 @@ function startLocal() {
 // You are always player A; the computer is player B and plays by itself.
 
 function pickLevel() {
-  app.name = myName("You");
+  clearTimeout(app.aiTimer);
+  app.name = $("#name") ? myName("You") : (app.game && app.game.names.A) || "You";
   showLobby(`<p>How strong should the computer be?</p>
     <button class="btn plain" data-act="solo" data-level="easy">Easy</button>
     <button class="btn plain" data-act="solo" data-level="medium">Medium</button>
@@ -306,7 +307,7 @@ function showGame() {
     }
   }
   root.innerHTML = `
-    <div class="top"><div class="carved">SENET <span class="ver">v${VERSION}</span></div><button data-act="rules">Rules</button></div>
+    <div class="top"><div class="carved">SENET <span class="ver">v${VERSION}</span></div><span class="topbtns"><button data-act="rules">Rules</button><button data-act="menu">Menu</button></span></div>
     <div class="game">
       <div class="frame"><div class="board" id="board">${cells}</div></div>
       <div class="side">
@@ -675,6 +676,40 @@ function showRules() {
   root.appendChild(sheet);
 }
 
+// Restart or leave. The sheet itself is the "are you sure?".
+function showMenu() {
+  const old = $(".sheet"); if (old) old.remove();
+  const sheet = document.createElement("div");
+  sheet.className = "sheet menu";
+  const online = app.mode !== "local";
+  sheet.innerHTML = `<h2>Menu</h2>
+    ${online ? "<p>Leaving keeps the game. Either of you can come back to it from the first screen.</p>"
+      : `<button class="btn plain" data-act="restart">Start this game again</button>`}
+    ${app.solo ? `<button class="btn plain" data-act="solo-pick">Change level (now ${esc(app.solo)})</button>` : ""}
+    <button class="btn plain" data-act="exit">${online ? "Leave the game" : "Exit to the first screen"}</button>
+    <button class="btn gold" data-act="close-rules">Back to the game</button>`;
+  root.appendChild(sheet);
+}
+
+function restartGame() {
+  if (app.mode !== "local") return;
+  clearTimeout(app.aiTimer);
+  app.game = newGame(app.game.names);
+  app.selected = null;
+  save();
+  showGame();
+  soloStep();
+}
+
+function exitGame() {
+  clearTimeout(app.aiTimer);
+  if (app.net) { app.net.close(); app.net = null; }
+  if (app.stream) { app.stream.getTracks().forEach((t) => t.stop()); app.stream = null; }
+  app.peerStream = null;
+  app.call = "";
+  showHome();
+}
+
 function showFilm() {
   const old = $(".sheet"); if (old) old.remove();
   const sheet = document.createElement("div");
@@ -795,6 +830,9 @@ const actions = {
   rules: showRules,
   "close-rules": () => { const v = $(".sheet video"); if (v) v.pause(); $(".sheet").remove(); },
   film: showFilm,
+  menu: showMenu,
+  restart: restartGame,
+  exit: exitGame,
   chat: showChat,
   "chat-send": () => sendChat($("#chat-input").value),
   "chat-quick": (button) => sendChat(button.textContent),
