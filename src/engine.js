@@ -270,3 +270,16 @@ export function applyMove(state, from, R = RULES) {
   }
   return endOfMove(s, s.pending.again);
 }
+
+// Give up the game: the other player wins at once.
+export function resign(state, who) {
+  if (state.phase === "over") return state;
+  const s = clone(state);
+  s.phase = "over";
+  s.winner = otherPlayer(who);
+  s.resigned = who;
+  s.pending = null;
+  s.fx = ["win"];
+  say(s, `${s.names[who]} resigned. ${s.names[s.winner]} wins.`);
+  return s;
+}

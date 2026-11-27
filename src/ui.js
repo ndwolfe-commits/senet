@@ -6,12 +6,12 @@
 // ============================================================================
 
 import { RULES, rulesSummary } from "./rules.js";
-import { newGame, throwSticks, applyMove, explainTap, legalMoves } from "./engine.js";
-import { createNet, newRoomCode } from "./net.js?v=22";
-import { sound } from "./sound.js?v=22";
+import { newGame, throwSticks, applyMove, explainTap, legalMoves, resign } from "./engine.js?v=23";
+import { createNet, newRoomCode } from "./net.js?v=23";
+import { sound } from "./sound.js?v=23";
 import { fireworks } from "./fireworks.js";
-import { chooseMove } from "./ai.js?v=22";
-import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=22";
+import { chooseMove } from "./ai.js?v=23";
+import { runChecks, insideAnotherApp, deviceLine } from "./check.js?v=23";
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -144,7 +144,7 @@ async function getMedia() {
   catch (e) { app.mediaOff = e && e.name === "NotAllowedError" ? "refused" : "missing"; return null; }
 }
 
-const VERSION = 22;
+const VERSION = 23;
 
 function connect() {
   if (app.net) app.net.close();
@@ -190,6 +190,7 @@ function onMessage(msg, { stored }) {
     return;
   }
   if (msg.t === "chat" && !stored && typeof msg.text === "string") return gotChat(msg.text.slice(0, 200));
+  if (msg.t === "note" && !stored) return gotNote(msg);
   if (msg.t !== "ping" || stored) return;
   // They're behind us (they reloaded, say): send them the game again.
   if (app.game && typeof msg.rev === "number" && msg.rev < (app.game.rev || 0)) app.net.sendState(app.game);
@@ -439,7 +440,7 @@ function headline() {
   const g = app.game;
   const local = twoOnOne();
   const turnName = g.names[g.turn];
-  if (g.phase === "over") return [local || g.winner !== app.me ? `${g.names[g.winner]} wins` : "You win", "Tap New game to play again."];
+  if (g.phase === "over") return [local || g.winner !== app.me ? `${g.names[g.winner]} wins` : "You win", `${g.resigned ? g.names[g.resigned] + " resigned. " : ""}Tap New game to play again.`];
   const mine = !local && g.turn === app.me;
   const who = mine ? "Your turn" : `${turnName}'s turn`;
   if (g.phase === "opening") {
@@ -573,9 +574,15 @@ function celebrate() {
   const g = app.game;
   const iWon = twoOnOne() || g.winner === app.me;
   const banner = document.createElement("div");
+  if (g.resigned && !iWon) {                                  // you gave up: no raspberry for that
+    banner.className = "banner lost";
+    banner.innerHTML = `<div class="carved">You resigned</div><div>${esc(g.names[g.winner])} wins.</div>`;
+    root.appendChild(banner);
+    return setTimeout(() => banner.remove(), 3500);
+  }
   banner.className = `banner ${iWon ? "" : "lost"}`;
   if (iWon) {
-    banner.innerHTML = `<div class="carved">${twoOnOne() ? esc(g.names[g.winner]) + " wins!" : "You win!"}</div>`;
+    banner.innerHTML = `<div class="carved">${twoOnOne() ? esc(g.names[g.winner]) + " wins!" : "You win!"}</div>${g.resigned ? `<div>${esc(g.names[g.resigned])} resigned.</div>` : ""}`;
     fireworks(root);
     sound.win();
   } else {
@@ -627,9 +634,9 @@ function savedGame(room) {
   try { return JSON.parse(store.get("senet-game-" + room)); } catch (e) { return null; }
 }
 
-function commit(next) {
+function commit(next, bump = 1) {
   if (next === app.game) return;
-  next = { ...next, rev: (app.game.rev || 0) + 1 };
+  next = { ...next, rev: (app.game.rev || 0) + bump };
   app.selected = null;
   app.game = next;
   save();
@@ -682,13 +689,54 @@ function showMenu() {
   const sheet = document.createElement("div");
   sheet.className = "sheet menu";
   const online = app.mode !== "local";
+  const playing = app.game.phase !== "over";
   sheet.innerHTML = `<h2>Menu</h2>
-    ${online ? "<p>Leaving keeps the game. Either of you can come back to it from the first screen.</p>"
-      : `<button class="btn plain" data-act="restart">Start this game again</button>`}
+    ${online && playing ? `<button class="btn plain" data-act="ask-restart">Ask ${esc(app.game.names[them()])} to start again</button>
+      <button class="btn plain" data-act="resign-ask">Resign this game</button>` : ""}
+    ${!online ? `<button class="btn plain" data-act="restart">Start this game again</button>` : ""}
     ${app.solo ? `<button class="btn plain" data-act="solo-pick">Change level (now ${esc(app.solo)})</button>` : ""}
-    <button class="btn plain" data-act="exit">${online ? "Leave the game" : "Exit to the first screen"}</button>
+    <button class="btn plain" data-act="exit">${online ? "Leave for now (the game is kept)" : "Exit to the first screen"}</button>
     <button class="btn gold" data-act="close-rules">Back to the game</button>`;
   root.appendChild(sheet);
+}
+
+function sheet(html, cls = "menu") {
+  const old = $(".sheet"); if (old) old.remove();
+  const el = document.createElement("div");
+  el.className = `sheet ${cls}`;
+  el.innerHTML = html;
+  root.appendChild(el);
+}
+
+// Giving up: the other player wins. Asked twice, because it can't be undone.
+function askResign() {
+  sheet(`<h2>Resign?</h2><p>${esc(app.game.names[them()])} wins this game. This can't be undone.</p>
+    <button class="btn plain" data-act="resign">Yes, resign</button>
+    <button class="btn gold" data-act="close-rules">No, keep playing</button>`);
+}
+
+// Starting again mid-game needs both players to agree.
+function askRestart() {
+  if (!app.net || app.conn !== "connected") { $(".sheet").remove(); return setFlash(`${app.game.names[them()]} isn't here to ask right now.`); }
+  app.net.sendNote({ ask: "restart" });
+  app.asked = Date.now();
+  $(".sheet").remove();
+  setFlash(`Asked ${app.game.names[them()]} to start again…`);
+}
+
+function gotNote(msg) {
+  const name = app.game ? app.game.names[them()] : "They";
+  if (msg.ask === "restart" && app.inGame) {
+    sound.move();
+    return sheet(`<h2>Start again?</h2><p>${esc(name)} would like to scrap this game and start a new one.</p>
+      <button class="btn plain" data-act="agree-restart">Yes, start again</button>
+      <button class="btn gold" data-act="refuse-restart">No, keep playing</button>`);
+  }
+  if (msg.answer === "restart" && app.asked && Date.now() - app.asked < 5 * 60000) {
+    app.asked = 0;
+    if (msg.yes) { commit(newGame(app.game.names), 10); setFlash("New game."); }
+    else setFlash(`${name} would rather keep playing.`);
+  }
 }
 
 function restartGame() {
@@ -831,6 +879,11 @@ const actions = {
   "close-rules": () => { const v = $(".sheet video"); if (v) v.pause(); $(".sheet").remove(); },
   film: showFilm,
   menu: showMenu,
+  "resign-ask": askResign,
+  resign: () => { $(".sheet").remove(); commit(resign(app.game, app.me), 10); },
+  "ask-restart": askRestart,
+  "agree-restart": () => { $(".sheet").remove(); app.net.sendNote({ answer: "restart", yes: true }); },
+  "refuse-restart": () => { $(".sheet").remove(); app.net.sendNote({ answer: "restart", yes: false }); },
   restart: restartGame,
   exit: exitGame,
   chat: showChat,

@@ -188,6 +188,8 @@ export function createNet({ room, me, getPing, stream, onMessage, onPeerStream, 
     sendState(game) { publish({ t: "state", game }, true); },
     // A short typed message. Not stored: it only reaches a player who is there.
     sendChat(text) { publish({ t: "chat", text }); },
+    // Ask the other player something, or answer them (used for "start again?").
+    sendNote(note) { publish({ t: "note", ...note }); },
     // Swap in a fresh camera and microphone (phones cut them when you leave the page).
     replaceStream(fresh) {
       stream = fresh;

@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { RULES } from "../src/rules.js";
-import { newGame, throwSticks, applyMove, legalMoves, rollSticks, explainTap } from "../src/engine.js";
+import { resign, newGame, throwSticks, applyMove, legalMoves, rollSticks, explainTap } from "../src/engine.js";
 
 const roll = (value) => ({ sticks: [], value });
 
@@ -166,4 +166,12 @@ test("explainTap gives a reason for a blocked piece and null for a legal one", (
   assert.match(explainTap(s, 10), /protected/);
   assert.equal(explainTap(s, 2), null);
   assert.match(explainTap(s, 12), /not your piece/);
+});
+
+test("resigning ends the game and the other player wins", () => {
+  const g = resign(newGame({ A: "Ann", B: "Bo" }), "A");
+  assert.equal(g.phase, "over");
+  assert.equal(g.winner, "B");
+  assert.equal(g.resigned, "A");
+  assert.equal(resign(g, "B"), g);
 });

@@ -11,7 +11,7 @@
 // ============================================================================
 
 import { RULES } from "./rules.js";
-import { legalMoves, applyMove, throwSticks, sideToMove, runLength } from "./engine.js";
+import { legalMoves, applyMove, throwSticks, sideToMove, runLength } from "./engine.js?v=23";
 
 export const LEVELS = ["easy", "medium", "hard"];
 
